@@ -68,16 +68,30 @@ pct create "$CTID" "local:vztmpl/$(basename "$LATEST_TEMPLATE")" \
   --unprivileged 1 \
   --onboot 1
 
-# --- Enable root autologin on Proxmox console ---
+# --- Enable root autologin on Proxmox console (Debian 11–13 compatible) ---
 echo -e "${YELLOW}🔓 Enabling root autologin for console access...${NC}"
 pct exec "$CTID" -- bash -c '
-mkdir -p /etc/systemd/system/getty@tty1.service.d
-cat <<EOF > /etc/systemd/system/getty@tty1.service.d/autologin.conf
+# For newer templates (console-getty.service)
+if systemctl list-unit-files | grep -q "^console-getty.service"; then
+  mkdir -p /etc/systemd/system/console-getty.service.d
+  cat <<EOF > /etc/systemd/system/console-getty.service.d/override.conf
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear console 115200,38400,9600 \$TERM
+EOF
+else
+  # For classic getty@tty1.service
+  mkdir -p /etc/systemd/system/getty@tty1.service.d
+  cat <<EOF > /etc/systemd/system/getty@tty1.service.d/autologin.conf
 [Service]
 ExecStart=
 ExecStart=-/sbin/agetty --autologin root --noclear %I \$TERM
 EOF
+fi
+
 systemctl daemon-reload
+systemctl enable console-getty.service || true
+systemctl restart console-getty.service || systemctl restart getty@tty1.service
 '
 
 echo -e "${GREEN}✅ Container created successfully.${NC}"

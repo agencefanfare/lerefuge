@@ -90,7 +90,11 @@ useradd -r -s /usr/sbin/nologin profilarr || true
 cd /opt
 git clone https://github.com/Dictionarry-Hub/profilarr.git
 cd profilarr
-npm ci --omit=dev
+
+# Install dependencies (use npm install since no lockfile exists)
+npm install --omit=dev
+
+# Fix permissions
 chown -R profilarr:profilarr /opt/profilarr
 
 # Create systemd service

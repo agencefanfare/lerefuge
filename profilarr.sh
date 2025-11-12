@@ -5,11 +5,12 @@
 # Inspired by Proxmox Community Scripts style
 # ==============================================================================
 # This script automatically:
-#   - Finds and downloads the latest Debian LXC template
-#   - Creates a lightweight unprivileged container
+#   - Detects and downloads the latest Debian LXC template
+#   - Creates a lightweight, unprivileged container
 #   - Installs Profilarr natively with Node.js
-#   - Sets up a systemd service
-#   - Starts and prints access URL
+#   - Enables root autologin in Proxmox console
+#   - Fixes locale and npm issues
+#   - Starts the service and prints access info
 # ==============================================================================
 
 set -e
@@ -32,11 +33,11 @@ NC='\033[0m'
 
 echo -e "${CYAN}🔍 Detecting latest Debian LXC template...${NC}"
 
-# --- Find the newest Debian standard template available ---
+# --- Find newest Debian standard template ---
 LATEST_TEMPLATE=$(pveam available | grep 'debian-[0-9][0-9]-standard' | sort -V | tail -n 1 | awk '{print $2}')
 
 if [ -z "$LATEST_TEMPLATE" ]; then
-  echo -e "${YELLOW}⚠️  No Debian template found. Please run 'pveam update' first.${NC}"
+  echo -e "${YELLOW}⚠️  No Debian template found. Updating template list...${NC}"
   pveam update
   LATEST_TEMPLATE=$(pveam available | grep 'debian-[0-9][0-9]-standard' | sort -V | tail -n 1 | awk '{print $2}')
   if [ -z "$LATEST_TEMPLATE" ]; then
@@ -67,6 +68,18 @@ pct create "$CTID" "local:vztmpl/$(basename "$LATEST_TEMPLATE")" \
   --unprivileged 1 \
   --onboot 1
 
+# --- Enable root autologin on Proxmox console ---
+echo -e "${YELLOW}🔓 Enabling root autologin for console access...${NC}"
+pct exec "$CTID" -- bash -c '
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+cat <<EOF > /etc/systemd/system/getty@tty1.service.d/autologin.conf
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear %I \$TERM
+EOF
+systemctl daemon-reload
+'
+
 echo -e "${GREEN}✅ Container created successfully.${NC}"
 
 # --- Start the container ---
@@ -77,27 +90,31 @@ echo -e "${CYAN}⚙️ Installing $APP inside CT $CTID...${NC}"
 
 pct exec "$CTID" -- bash -c "
 set -e
-apt update -y && apt install -y curl git sudo ca-certificates gnupg lsb-release
 
-# Install Node.js
+# --- Fix locale warnings ---
+echo 'en_US.UTF-8 UTF-8' > /etc/locale.gen
+apt update -y && apt install -y locales
+locale-gen en_US.UTF-8
+update-locale LANG=en_US.UTF-8
+
+# --- Install dependencies ---
+apt install -y curl git sudo ca-certificates gnupg lsb-release apt-transport-https
+
+# --- Install Node.js (LTS) ---
 curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
 apt install -y nodejs
 
-# Create dedicated user
+# --- Create dedicated non-root user ---
 useradd -r -s /usr/sbin/nologin profilarr || true
 
-# Clone Profilarr
+# --- Install Profilarr ---
 cd /opt
 git clone https://github.com/Dictionarry-Hub/profilarr.git
 cd profilarr
-
-# Install dependencies (use npm install since no lockfile exists)
 npm install --omit=dev
-
-# Fix permissions
 chown -R profilarr:profilarr /opt/profilarr
 
-# Create systemd service
+# --- Create systemd service ---
 cat <<EOF > /etc/systemd/system/profilarr.service
 [Unit]
 Description=Profilarr (Radarr/Sonarr Profile Manager)
@@ -134,6 +151,6 @@ echo "📁 Installed in: /opt/profilarr"
 echo "🧩 Service: systemctl status profilarr"
 echo ""
 echo "🔄 To update later:"
-echo "   pct exec $CTID -- bash -c 'cd /opt/profilarr && git pull && npm ci --omit=dev && systemctl restart profilarr'"
+echo "   pct exec $CTID -- bash -c 'cd /opt/profilarr && git pull && npm install --omit=dev && systemctl restart profilarr'"
 echo ""
 echo -e "${CYAN}🎉 Installation complete!${NC}"

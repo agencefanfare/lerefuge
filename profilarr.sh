@@ -1,52 +1,77 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# 👋 Profilarr LXC Installer for Proxmox (no Docker, lightweight)
-# Author: Simon / Serveur Le Refuge (based on Community Scripts style)
+# 📦 Proxmox LXC Installer for Profilarr (No Docker, Lightweight)
+# Author: Simon Ouellet / Serveur Le Refuge
+# Inspired by Proxmox Community Scripts style
 # ==============================================================================
 
 set -e
 
 APP="Profilarr"
-REPO="https://github.com/Dictionarry-Hub/profilarr"
-INSTALL_DIR="/opt/profilarr"
-SERVICE_FILE="/etc/systemd/system/profilarr.service"
+CTID=${CTID:-118}
+HOSTNAME="profilarr"
+MEMORY="1024"
+STORAGE="local-lvm"
+BRIDGE="vmbr0"
 NODE_VERSION="20"
+PORT="9898"
 
-echo "⚙️ Installing $APP natively (Node.js v$NODE_VERSION)..."
+# Colors
+YELLOW='\033[1;33m'
+GREEN='\033[1;32m'
+NC='\033[0m'
 
-# --- Update system ---
-apt update -y
-apt upgrade -y
-apt install -y curl git sudo ca-certificates lsb-release gnupg
+echo -e "${YELLOW}🧱 Creating $APP LXC container...${NC}"
 
-# --- Install Node.js (LTS) ---
-if ! command -v node >/dev/null 2>&1; then
-  echo "📦 Installing Node.js..."
-  curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
-  apt install -y nodejs
-else
-  echo "✅ Node.js already installed."
+# --- Create container ---
+pveam update >/dev/null
+TEMPLATE=$(pveam available | grep debian-12 | head -n1 | awk '{print $1}')
+if [ -z "$TEMPLATE" ]; then
+  echo "❌ No Debian 12 template found. Please download one with:"
+  echo "pveam download local debian-12-standard_12.*_amd64.tar.zst"
+  exit 1
 fi
 
-# --- Create system user ---
-if ! id -u profilarr >/dev/null 2>&1; then
-  useradd -r -s /usr/sbin/nologin profilarr
-fi
+pct create $CTID $TEMPLATE \
+  --hostname $HOSTNAME \
+  --cores 2 \
+  --memory $MEMORY \
+  --swap 256 \
+  --net0 name=eth0,bridge=$BRIDGE,ip=dhcp \
+  --rootfs $STORAGE:8 \
+  --features nesting=1 \
+  --unprivileged 1 \
+  --onboot 1
 
-# --- Download and install Profilarr ---
-echo "⬇️ Cloning $REPO..."
-rm -rf "$INSTALL_DIR"
-git clone "$REPO" "$INSTALL_DIR"
+echo -e "${GREEN}✅ Container created (ID $CTID)${NC}"
 
-cd "$INSTALL_DIR"
+# --- Start container ---
+pct start $CTID
+sleep 5
+
+echo -e "${YELLOW}⚙️ Installing $APP inside the container...${NC}"
+
+# --- Run installation inside LXC ---
+pct exec $CTID -- bash -c "
+set -e
+apt update -y && apt install -y curl git sudo ca-certificates gnupg lsb-release
+
+# Install Node.js
+curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
+apt install -y nodejs
+
+# Create user
+useradd -r -s /usr/sbin/nologin profilarr
+
+# Clone Profilarr
+cd /opt
+git clone https://github.com/Dictionarry-Hub/profilarr.git
+cd profilarr
 npm ci --omit=dev
+chown -R profilarr:profilarr /opt/profilarr
 
-# --- Permissions ---
-chown -R profilarr:profilarr "$INSTALL_DIR"
-
-# --- Create systemd service ---
-echo "🧩 Creating systemd service..."
-cat <<EOF > $SERVICE_FILE
+# Create systemd service
+cat <<EOF > /etc/systemd/system/profilarr.service
 [Unit]
 Description=Profilarr (Radarr/Sonarr Profile Manager)
 After=network.target
@@ -54,7 +79,7 @@ After=network.target
 [Service]
 Type=simple
 User=profilarr
-WorkingDirectory=$INSTALL_DIR
+WorkingDirectory=/opt/profilarr
 ExecStart=/usr/bin/npm run start
 Restart=on-failure
 Environment=NODE_ENV=production
@@ -65,18 +90,23 @@ StandardError=append:/var/log/profilarr.err.log
 WantedBy=multi-user.target
 EOF
 
-# --- Enable and start service ---
 systemctl daemon-reload
 systemctl enable profilarr
 systemctl start profilarr
+"
 
-# --- Done ---
-IP=$(hostname -I | awk '{print $1}')
+# --- Get IP ---
+IP=$(pct exec $CTID -- hostname -I | awk '{print $1}')
+
 echo ""
-echo "✅ $APP installation complete!"
-echo "🌐 Access it at: http://$IP:9898"
-echo "📁 Installed in: $INSTALL_DIR"
-echo "🧱 Service: systemctl status profilarr"
+echo -e "${GREEN}✅ $APP is now installed and running inside CT $CTID${NC}"
+echo ""
+echo "🌐 Access it at: http://$IP:$PORT"
+echo "📦 LXC Hostname: $HOSTNAME"
+echo "📁 App directory: /opt/profilarr"
+echo "🧩 Service: systemctl status profilarr"
+echo ""
 echo "🔄 To update later:"
-echo "   cd $INSTALL_DIR && sudo -u profilarr git pull && npm ci --omit=dev && systemctl restart profilarr"
+echo "   pct exec $CTID -- bash -c 'cd /opt/profilarr && git pull && npm ci --omit=dev && systemctl restart profilarr'"
 echo ""
+echo "🎉 Installation complete!"

@@ -4,9 +4,17 @@
 # Author: Simon Ouellet / Serveur Le Refuge
 # Inspired by Proxmox Community Scripts style
 # ==============================================================================
+# This script automatically:
+#   - Finds and downloads the latest Debian LXC template
+#   - Creates a lightweight unprivileged container
+#   - Installs Profilarr natively with Node.js
+#   - Sets up a systemd service
+#   - Starts and prints access URL
+# ==============================================================================
 
 set -e
 
+# --- Configuration ---
 APP="Profilarr"
 CTID=${CTID:-118}
 HOSTNAME="profilarr"
@@ -16,43 +24,58 @@ BRIDGE="vmbr0"
 NODE_VERSION="20"
 PORT="9898"
 
-# Colors
+# --- Styling ---
 YELLOW='\033[1;33m'
 GREEN='\033[1;32m'
+CYAN='\033[1;36m'
 NC='\033[0m'
 
-echo -e "${YELLOW}🧱 Creating $APP LXC container...${NC}"
+echo -e "${CYAN}🔍 Detecting latest Debian LXC template...${NC}"
 
-# --- Create container ---
-pveam update >/dev/null
-TEMPLATE=$(pveam available | grep debian-12 | head -n1 | awk '{print $1}')
-if [ -z "$TEMPLATE" ]; then
-  echo "❌ No Debian 12 template found. Please download one with:"
-  echo "pveam download local debian-12-standard_12.*_amd64.tar.zst"
-  exit 1
+# --- Find the newest Debian standard template available ---
+LATEST_TEMPLATE=$(pveam available | grep 'debian-[0-9][0-9]-standard' | sort -V | tail -n 1 | awk '{print $2}')
+
+if [ -z "$LATEST_TEMPLATE" ]; then
+  echo -e "${YELLOW}⚠️  No Debian template found. Please run 'pveam update' first.${NC}"
+  pveam update
+  LATEST_TEMPLATE=$(pveam available | grep 'debian-[0-9][0-9]-standard' | sort -V | tail -n 1 | awk '{print $2}')
+  if [ -z "$LATEST_TEMPLATE" ]; then
+    echo "❌ Still no template found. Exiting."
+    exit 1
+  fi
 fi
 
-pct create $CTID $TEMPLATE \
-  --hostname $HOSTNAME \
+# --- Download if missing ---
+if ! pveam list local | grep -q $(basename "$LATEST_TEMPLATE"); then
+  echo -e "${YELLOW}📦 Downloading latest Debian template: ${LATEST_TEMPLATE}${NC}"
+  pveam download local "$LATEST_TEMPLATE"
+else
+  echo -e "${GREEN}✅ Template already downloaded: ${LATEST_TEMPLATE}${NC}"
+fi
+
+# --- Create the container ---
+echo -e "${CYAN}🧱 Creating LXC container ($HOSTNAME, CTID $CTID)...${NC}"
+
+pct create "$CTID" "local:vztmpl/$(basename "$LATEST_TEMPLATE")" \
+  --hostname "$HOSTNAME" \
   --cores 2 \
-  --memory $MEMORY \
+  --memory "$MEMORY" \
   --swap 256 \
-  --net0 name=eth0,bridge=$BRIDGE,ip=dhcp \
-  --rootfs $STORAGE:8 \
+  --net0 name=eth0,bridge="$BRIDGE",ip=dhcp \
+  --rootfs "$STORAGE":8 \
   --features nesting=1 \
   --unprivileged 1 \
   --onboot 1
 
-echo -e "${GREEN}✅ Container created (ID $CTID)${NC}"
+echo -e "${GREEN}✅ Container created successfully.${NC}"
 
-# --- Start container ---
-pct start $CTID
+# --- Start the container ---
+pct start "$CTID"
 sleep 5
 
-echo -e "${YELLOW}⚙️ Installing $APP inside the container...${NC}"
+echo -e "${CYAN}⚙️ Installing $APP inside CT $CTID...${NC}"
 
-# --- Run installation inside LXC ---
-pct exec $CTID -- bash -c "
+pct exec "$CTID" -- bash -c "
 set -e
 apt update -y && apt install -y curl git sudo ca-certificates gnupg lsb-release
 
@@ -60,8 +83,8 @@ apt update -y && apt install -y curl git sudo ca-certificates gnupg lsb-release
 curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
 apt install -y nodejs
 
-# Create user
-useradd -r -s /usr/sbin/nologin profilarr
+# Create dedicated user
+useradd -r -s /usr/sbin/nologin profilarr || true
 
 # Clone Profilarr
 cd /opt
@@ -95,18 +118,18 @@ systemctl enable profilarr
 systemctl start profilarr
 "
 
-# --- Get IP ---
-IP=$(pct exec $CTID -- hostname -I | awk '{print $1}')
+# --- Get container IP ---
+IP=$(pct exec "$CTID" -- hostname -I | awk '{print $1}')
 
 echo ""
-echo -e "${GREEN}✅ $APP is now installed and running inside CT $CTID${NC}"
+echo -e "${GREEN}✅ $APP successfully installed and running inside CT $CTID${NC}"
 echo ""
 echo "🌐 Access it at: http://$IP:$PORT"
-echo "📦 LXC Hostname: $HOSTNAME"
-echo "📁 App directory: /opt/profilarr"
+echo "📦 Hostname: $HOSTNAME"
+echo "📁 Installed in: /opt/profilarr"
 echo "🧩 Service: systemctl status profilarr"
 echo ""
 echo "🔄 To update later:"
 echo "   pct exec $CTID -- bash -c 'cd /opt/profilarr && git pull && npm ci --omit=dev && systemctl restart profilarr'"
 echo ""
-echo "🎉 Installation complete!"
+echo -e "${CYAN}🎉 Installation complete!${NC}"

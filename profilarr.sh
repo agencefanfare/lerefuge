@@ -52,10 +52,21 @@ pct create "$CTID" "local:vztmpl/$(basename "$LATEST_TEMPLATE")" \
   --onboot 1
 echo -e "${GREEN}✅ Container created.${NC}"
 
-# --- Root autologin (handles Debian 11–13) ---
-echo -e "${YELLOW}🔓 Configuring root autologin...${NC}"
+# --- Enable root autologin on Proxmox console (covers Debian 11 → 13+) ---
+echo -e "${YELLOW}🔓 Configuring root autologin for console access...${NC}"
 pct exec "$CTID" -- bash -c '
-if systemctl list-unit-files | grep -q "^console-getty.service"; then
+# Debian 13+ (container-getty@1.service)
+if systemctl list-unit-files | grep -q "^container-getty@1.service"; then
+  mkdir -p /etc/systemd/system/container-getty@1.service.d
+  cat <<EOF >/etc/systemd/system/container-getty@1.service.d/override.conf
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear tty1 linux
+EOF
+  systemctl daemon-reload
+  systemctl restart container-getty@1.service
+# Debian 12 and earlier (console-getty or getty@tty1)
+elif systemctl list-unit-files | grep -q "^console-getty.service"; then
   mkdir -p /etc/systemd/system/console-getty.service.d
   cat <<EOF >/etc/systemd/system/console-getty.service.d/override.conf
 [Service]
@@ -63,7 +74,7 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin root --noclear console 115200,38400,9600 \$TERM
 EOF
   systemctl daemon-reload
-  systemctl enable console-getty.service
+  systemctl restart console-getty.service
 else
   mkdir -p /etc/systemd/system/getty@tty1.service.d
   cat <<EOF >/etc/systemd/system/getty@tty1.service.d/autologin.conf
@@ -72,9 +83,10 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin root --noclear %I \$TERM
 EOF
   systemctl daemon-reload
-  systemctl enable getty@tty1.service
+  systemctl restart getty@tty1.service
 fi
 '
+
 
 # --- Start container ---
 pct start "$CTID"

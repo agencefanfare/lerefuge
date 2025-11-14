@@ -46,7 +46,6 @@ type Movie struct {
 	PosterURL   string
 }
 
-// Grouped structures for display
 type SeriesGroup struct {
 	SeriesTitle string
 	PosterURL   string
@@ -54,12 +53,12 @@ type SeriesGroup struct {
 }
 
 type NewsletterData struct {
-	WeekStart           string
-	WeekEnd             string
-	UpcomingSeriesGroups []SeriesGroup
-	UpcomingMovies      []Movie
+	WeekStart              string
+	WeekEnd                string
+	UpcomingSeriesGroups   []SeriesGroup
+	UpcomingMovies         []Movie
 	DownloadedSeriesGroups []SeriesGroup
-	DownloadedMovies    []Movie
+	DownloadedMovies       []Movie
 }
 
 func loadConfig() Config {
@@ -91,7 +90,7 @@ func getEnv(key, fallback string) string {
 
 func groupEpisodesBySeries(episodes []Episode) []SeriesGroup {
 	seriesMap := make(map[string]*SeriesGroup)
-	
+
 	for _, ep := range episodes {
 		if _, exists := seriesMap[ep.SeriesTitle]; !exists {
 			seriesMap[ep.SeriesTitle] = &SeriesGroup{
@@ -102,11 +101,9 @@ func groupEpisodesBySeries(episodes []Episode) []SeriesGroup {
 		}
 		seriesMap[ep.SeriesTitle].Episodes = append(seriesMap[ep.SeriesTitle].Episodes, ep)
 	}
-	
-	// Convert map to slice and sort
+
 	var groups []SeriesGroup
 	for _, group := range seriesMap {
-		// Sort episodes within each group
 		sort.Slice(group.Episodes, func(i, j int) bool {
 			if group.Episodes[i].SeasonNum != group.Episodes[j].SeasonNum {
 				return group.Episodes[i].SeasonNum < group.Episodes[j].SeasonNum
@@ -115,12 +112,11 @@ func groupEpisodesBySeries(episodes []Episode) []SeriesGroup {
 		})
 		groups = append(groups, *group)
 	}
-	
-	// Sort groups by series title
+
 	sort.Slice(groups, func(i, j int) bool {
 		return groups[i].SeriesTitle < groups[j].SeriesTitle
 	})
-	
+
 	return groups
 }
 
@@ -142,7 +138,7 @@ func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	
+
 	var result struct {
 		Records []struct {
 			SeriesID    int       `json:"seriesId"`
@@ -229,7 +225,7 @@ func fetchSonarrCalendar(cfg Config, start, end time.Time) ([]Episode, error) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	
+
 	var result []struct {
 		Series struct {
 			Title  string `json:"title"`
@@ -295,7 +291,7 @@ func fetchRadarrHistory(cfg Config, since time.Time) ([]Movie, error) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	
+
 	var result struct {
 		Records []struct {
 			MovieID   int       `json:"movieId"`
@@ -369,7 +365,7 @@ func fetchRadarrCalendar(cfg Config, start, end time.Time) ([]Movie, error) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	
+
 	var result []struct {
 		Title           string `json:"title"`
 		Year            int    `json:"year"`
@@ -618,7 +614,6 @@ func generateHTML(data NewsletterData) (string, error) {
         <h1>📺 Newslettar</h1>
         <div class="date-range">Week of {{ .WeekStart }} - {{ .WeekEnd }}</div>
 
-        <!-- UPCOMING RELEASES FIRST -->
         <div class="section">
             <h2>📅 Coming Next Week</h2>
             
@@ -669,7 +664,6 @@ func generateHTML(data NewsletterData) (string, error) {
             {{ end }}
         </div>
 
-        <!-- DOWNLOADED SECTION (LESS PROMINENT) -->
         <div class="section downloaded-section">
             <h2>📥 Downloaded Last Week</h2>
             
@@ -811,6 +805,44 @@ func main() {
 		log.Printf("✓ Found %d upcoming movies", len(upcomingMovies))
 	}
 
-	// Group episodes by series
 	log.Println("📊 Grouping episodes by series...")
-	downloadedSeriesGroups := groupEpis
+	downloadedSeriesGroups := groupEpisodesBySeries(downloadedShows)
+	upcomingSeriesGroups := groupEpisodesBySeries(upcomingShows)
+
+	log.Printf("✓ Grouped into %d downloaded series and %d upcoming series",
+		len(downloadedSeriesGroups), len(upcomingSeriesGroups))
+
+	sort.Slice(downloadedMovies, func(i, j int) bool {
+		return downloadedMovies[i].Title < downloadedMovies[j].Title
+	})
+	sort.Slice(upcomingMovies, func(i, j int) bool {
+		if upcomingMovies[i].ReleaseDate == upcomingMovies[j].ReleaseDate {
+			return upcomingMovies[i].Title < upcomingMovies[j].Title
+		}
+		return upcomingMovies[i].ReleaseDate < upcomingMovies[j].ReleaseDate
+	})
+
+	data := NewsletterData{
+		WeekStart:              weekAgo.Format("Jan 2"),
+		WeekEnd:                now.Format("Jan 2, 2006"),
+		UpcomingSeriesGroups:   upcomingSeriesGroups,
+		UpcomingMovies:         upcomingMovies,
+		DownloadedSeriesGroups: downloadedSeriesGroups,
+		DownloadedMovies:       downloadedMovies,
+	}
+
+	log.Println("📝 Generating HTML...")
+	html, err := generateHTML(data)
+	if err != nil {
+		log.Fatalf("❌ Error generating HTML: %v", err)
+	}
+
+	subject := fmt.Sprintf("Newslettar - Week of %s", now.Format("Jan 2, 2006"))
+
+	log.Println("📧 Sending email...")
+	if err := sendEmail(cfg, subject, html); err != nil {
+		log.Fatalf("❌ Error sending email: %v", err)
+	}
+
+	log.Println("✅ Newsletter sent successfully!")
+}

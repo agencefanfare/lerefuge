@@ -88,7 +88,7 @@ type WebConfig struct {
 	ScheduleTime   string `json:"schedule_time"`
 }
 
-const version = "1.0.12"
+const version = "1.0.13"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")
@@ -297,6 +297,38 @@ func loadConfig() Config {
 
 func getEnv(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+// Read .env file directly (for web UI to show current saved values)
+func readEnvFile() map[string]string {
+	envMap := make(map[string]string)
+	
+	data, err := os.ReadFile("/opt/newslettar/.env")
+	if err != nil {
+		return envMap
+	}
+	
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+	
+	return envMap
+}
+
+func getEnvFromFile(envMap map[string]string, key, fallback string) string {
+	if value, exists := envMap[key]; exists && value != "" {
 		return value
 	}
 	return fallback
@@ -1359,18 +1391,22 @@ func configHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// Read from .env file directly instead of os.Getenv()
+		// This ensures we show the saved values, not the process environment
+		envMap := readEnvFile()
+
 		cfg := WebConfig{
-			SonarrURL:    getEnv("SONARR_URL", ""),
-			SonarrAPIKey: getEnv("SONARR_API_KEY", ""),
-			RadarrURL:    getEnv("RADARR_URL", ""),
-			RadarrAPIKey: getEnv("RADARR_API_KEY", ""),
-			MailgunSMTP:  getEnv("MAILGUN_SMTP", "smtp.mailgun.org"),
-			MailgunPort:  getEnv("MAILGUN_PORT", "587"),
-			MailgunUser:  getEnv("MAILGUN_USER", ""),
-			MailgunPass:  getEnv("MAILGUN_PASS", ""),
-			FromEmail:    getEnv("FROM_EMAIL", ""),
-			FromName:     getEnv("FROM_NAME", "Newslettar"),
-			ToEmails:     getEnv("TO_EMAILS", ""),
+			SonarrURL:    getEnvFromFile(envMap, "SONARR_URL", ""),
+			SonarrAPIKey: getEnvFromFile(envMap, "SONARR_API_KEY", ""),
+			RadarrURL:    getEnvFromFile(envMap, "RADARR_URL", ""),
+			RadarrAPIKey: getEnvFromFile(envMap, "RADARR_API_KEY", ""),
+			MailgunSMTP:  getEnvFromFile(envMap, "MAILGUN_SMTP", "smtp.mailgun.org"),
+			MailgunPort:  getEnvFromFile(envMap, "MAILGUN_PORT", "587"),
+			MailgunUser:  getEnvFromFile(envMap, "MAILGUN_USER", ""),
+			MailgunPass:  getEnvFromFile(envMap, "MAILGUN_PASS", ""),
+			FromEmail:    getEnvFromFile(envMap, "FROM_EMAIL", ""),
+			FromName:     getEnvFromFile(envMap, "FROM_NAME", "Newslettar"),
+			ToEmails:     getEnvFromFile(envMap, "TO_EMAILS", ""),
 			ScheduleDay:  scheduleDay,
 			ScheduleTime: scheduleTime,
 		}

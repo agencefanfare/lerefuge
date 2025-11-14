@@ -79,7 +79,7 @@ type WebConfig struct {
 	ScheduleTime   string `json:"schedule_time"`
 }
 
-const version = "1.0.6"
+const version = "1.0.7"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")

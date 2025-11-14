@@ -1,9 +1,9 @@
 {
-  "version": "1.0.6",
-  "released": "2025-11-14",
+  "version": "1.0.7",
+  "released": "2025-01-27",
   "changelog": [
-    "Fixed binary replacement during updates",
-    "Service stops cleanly before binary swap",
-    "Update process more reliable"
+    "Updated UI to dark greyish theme",
+    "Improved contrast and readability",
+    "Dark theme applied to all UI elements including forms, buttons, and status boxes"
   ]
 }

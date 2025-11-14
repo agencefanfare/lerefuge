@@ -88,7 +88,7 @@ type WebConfig struct {
 	ScheduleTime   string `json:"schedule_time"`
 }
 
-const version = "1.0.13"
+const version = "1.0.14"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")
@@ -1666,6 +1666,46 @@ func logsHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, strings.Join(lines[start:], "\n"))
 }
 
+// Compare semantic versions (returns true if remote is newer than current)
+func isNewerVersion(remote, current string) bool {
+	// Remove 'v' prefix if present
+	remote = strings.TrimPrefix(remote, "v")
+	current = strings.TrimPrefix(current, "v")
+	
+	// Parse versions like "1.0.13" into [1, 0, 13]
+	remoteParts := strings.Split(remote, ".")
+	currentParts := strings.Split(current, ".")
+	
+	// Pad to same length
+	maxLen := len(remoteParts)
+	if len(currentParts) > maxLen {
+		maxLen = len(currentParts)
+	}
+	
+	for len(remoteParts) < maxLen {
+		remoteParts = append(remoteParts, "0")
+	}
+	for len(currentParts) < maxLen {
+		currentParts = append(currentParts, "0")
+	}
+	
+	// Compare each part
+	for i := 0; i < maxLen; i++ {
+		var remoteNum, currentNum int
+		fmt.Sscanf(remoteParts[i], "%d", &remoteNum)
+		fmt.Sscanf(currentParts[i], "%d", &currentNum)
+		
+		if remoteNum > currentNum {
+			return true // Remote is newer
+		} else if remoteNum < currentNum {
+			return false // Current is newer
+		}
+		// If equal, continue to next part
+	}
+	
+	return false // Versions are equal
+}
+
 func versionHandler(w http.ResponseWriter, r *http.Request) {
 	// Fetch latest version from GitHub
 	resp, err := http.Get("https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar/version.json")
@@ -1698,7 +1738,8 @@ func versionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updateAvailable := remoteVersion.Version != version
+	// Compare versions properly (only update if remote is newer)
+	updateAvailable := isNewerVersion(remoteVersion.Version, version)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

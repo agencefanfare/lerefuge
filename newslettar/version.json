@@ -1,12 +1,13 @@
 {
-  "version": "1.0.11",
+  "version": "1.0.12",
   "released": "2025-11-14",
   "changelog": [
-    "FIXED: Individual save buttons now work correctly for each section",
-    "Each section (Sonarr, Radarr, Email, Schedule) has its own save function",
-    "No longer requires all fields to be filled to save one section",
-    "Removed 'required' attributes from form fields for flexibility",
-    "Better error messages when saving with missing fields",
+    "FIXED: Save button now properly saves all configuration",
+    "FIXED: Configuration now reloads after save to show saved values",
+    "FIXED: Update button now works correctly (matches manual update command)",
+    "Removed individual save buttons - back to single 'Save All Configuration' button",
+    "Update button now includes version.json download",
+    "Better update logging for troubleshooting",
     "All v1.0.10 improvements included (schedule validation, no unscheduled sends)"
   ]
 }

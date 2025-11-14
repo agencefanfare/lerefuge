@@ -88,7 +88,7 @@ type WebConfig struct {
 	ScheduleTime   string `json:"schedule_time"`
 }
 
-const version = "1.0.11"
+const version = "1.0.12"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")
@@ -954,7 +954,6 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                         <div class="form-group"><label>Sonarr URL</label><input type="text" id="sonarr_url" placeholder="http://192.168.1.100:8989"></div>
                         <div class="form-group"><label>Sonarr API Key</label><input type="text" id="sonarr_api_key" placeholder="Your Sonarr API Key"></div>
                         <button type="button" class="btn btn-secondary test-connection-btn" onclick="testSonarr()">🔍 Test Connection</button>
-                        <button type="button" class="btn btn-primary test-connection-btn" onclick="saveSonarr()">💾 Save Sonarr Settings</button>
                         <div id="sonarrTestResult" class="test-results"></div>
                     </div>
                     <div class="form-section">
@@ -962,7 +961,6 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                         <div class="form-group"><label>Radarr URL</label><input type="text" id="radarr_url" placeholder="http://192.168.1.100:7878"></div>
                         <div class="form-group"><label>Radarr API Key</label><input type="text" id="radarr_api_key" placeholder="Your Radarr API Key"></div>
                         <button type="button" class="btn btn-secondary test-connection-btn" onclick="testRadarr()">🔍 Test Connection</button>
-                        <button type="button" class="btn btn-primary test-connection-btn" onclick="saveRadarr()">💾 Save Radarr Settings</button>
                         <div id="radarrTestResult" class="test-results"></div>
                     </div>
                     <div class="form-section">
@@ -975,7 +973,6 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                         <div class="form-group"><label>From Name (Sender Display Name)</label><input type="text" id="from_name" placeholder="Newslettar" value="Newslettar"></div>
                         <div class="form-group"><label>To Email(s) (comma-separated)</label><input type="text" id="to_emails" placeholder="user1@example.com, user2@example.com"></div>
                         <button type="button" class="btn btn-secondary test-connection-btn" onclick="testEmail()">🔍 Test Connection</button>
-                        <button type="button" class="btn btn-primary test-connection-btn" onclick="saveEmail()">💾 Save Email Settings</button>
                         <div id="emailTestResult" class="test-results"></div>
                     </div>
 
@@ -1000,7 +997,6 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                         <div style="background: #2d3a4a; padding: 10px; border-radius: 6px; font-size: 0.9em; color: #a0b0d0; border: 1px solid #3a4a5a; margin-bottom: 15px;">
                             ℹ️ Newsletter will be sent automatically every <strong><span id="schedule_preview">Sunday at 09:00</span></strong>
                         </div>
-                        <button type="button" class="btn btn-primary" onclick="saveSchedule()">💾 Save Schedule</button>
                     </div>
                     <button type="submit" class="btn btn-primary" style="margin-top: 20px;">💾 Save All Configuration</button>
                 </form>
@@ -1111,7 +1107,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
         });
         
         function saveConfig(e) {
-            e.preventDefault();
+            if (e) e.preventDefault();
             const config = {
                 sonarr_url: document.getElementById('sonarr_url').value,
                 sonarr_api_key: document.getElementById('sonarr_api_key').value,
@@ -1127,110 +1123,20 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                 schedule_day: document.getElementById('schedule_day').value,
                 schedule_time: document.getElementById('schedule_time').value,
             };
+            
+            showStatus('configStatus', '💾 Saving configuration...', 'info');
+            
             fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) })
                 .then(r => r.json())
                 .then(() => {
-                    showStatus('configStatus', '✓ Configuration saved successfully! Schedule updated.', 'success');
-                    updateSystemdTimer();
+                    showStatus('configStatus', '✓ Configuration saved successfully!', 'success');
+                    // Reload config to show what was actually saved
+                    setTimeout(() => loadConfig(), 500);
                 })
-                .catch(() => showStatus('configStatus', '✗ Error saving configuration', 'error'));
-        }
-        
-        function saveSonarr() {
-            const sonarrUrl = document.getElementById('sonarr_url').value;
-            const sonarrKey = document.getElementById('sonarr_api_key').value;
-            
-            if (!sonarrUrl || !sonarrKey) {
-                showStatus('configStatus', '✗ Please fill in both Sonarr URL and API Key', 'error');
-                return;
-            }
-            
-            // Load current config and update only Sonarr fields
-            fetch('/api/config').then(r => r.json()).then(currentConfig => {
-                currentConfig.sonarr_url = sonarrUrl;
-                currentConfig.sonarr_api_key = sonarrKey;
-                
-                fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(currentConfig) })
-                    .then(r => r.json())
-                    .then(() => showStatus('configStatus', '✓ Sonarr settings saved successfully!', 'success'))
-                    .catch(() => showStatus('configStatus', '✗ Error saving Sonarr settings', 'error'));
-            });
-        }
-        
-        function saveRadarr() {
-            const radarrUrl = document.getElementById('radarr_url').value;
-            const radarrKey = document.getElementById('radarr_api_key').value;
-            
-            if (!radarrUrl || !radarrKey) {
-                showStatus('configStatus', '✗ Please fill in both Radarr URL and API Key', 'error');
-                return;
-            }
-            
-            // Load current config and update only Radarr fields
-            fetch('/api/config').then(r => r.json()).then(currentConfig => {
-                currentConfig.radarr_url = radarrUrl;
-                currentConfig.radarr_api_key = radarrKey;
-                
-                fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(currentConfig) })
-                    .then(r => r.json())
-                    .then(() => showStatus('configStatus', '✓ Radarr settings saved successfully!', 'success'))
-                    .catch(() => showStatus('configStatus', '✗ Error saving Radarr settings', 'error'));
-            });
-        }
-        
-        function saveEmail() {
-            const smtp = document.getElementById('mailgun_smtp').value;
-            const port = document.getElementById('mailgun_port').value;
-            const user = document.getElementById('mailgun_user').value;
-            const pass = document.getElementById('mailgun_pass').value;
-            const fromEmail = document.getElementById('from_email').value;
-            const fromName = document.getElementById('from_name').value;
-            const toEmails = document.getElementById('to_emails').value;
-            
-            if (!smtp || !port || !user || !pass || !fromEmail || !toEmails) {
-                showStatus('configStatus', '✗ Please fill in all email fields', 'error');
-                return;
-            }
-            
-            // Load current config and update only Email fields
-            fetch('/api/config').then(r => r.json()).then(currentConfig => {
-                currentConfig.mailgun_smtp = smtp;
-                currentConfig.mailgun_port = port;
-                currentConfig.mailgun_user = user;
-                currentConfig.mailgun_pass = pass;
-                currentConfig.from_email = fromEmail;
-                currentConfig.from_name = fromName;
-                currentConfig.to_emails = toEmails;
-                
-                fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(currentConfig) })
-                    .then(r => r.json())
-                    .then(() => showStatus('configStatus', '✓ Email settings saved successfully!', 'success'))
-                    .catch(() => showStatus('configStatus', '✗ Error saving email settings', 'error'));
-            });
-        }
-        
-        function saveSchedule() {
-            const scheduleDay = document.getElementById('schedule_day').value;
-            const scheduleTime = document.getElementById('schedule_time').value;
-            
-            if (!scheduleDay || !scheduleTime) {
-                showStatus('configStatus', '✗ Please select both day and time', 'error');
-                return;
-            }
-            
-            // Load current config and update only Schedule fields
-            fetch('/api/config').then(r => r.json()).then(currentConfig => {
-                currentConfig.schedule_day = scheduleDay;
-                currentConfig.schedule_time = scheduleTime;
-                
-                fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(currentConfig) })
-                    .then(r => r.json())
-                    .then(() => {
-                        showStatus('configStatus', '✓ Schedule saved successfully!', 'success');
-                        updateSystemdTimer();
-                    })
-                    .catch(() => showStatus('configStatus', '✗ Error saving schedule', 'error'));
-            });
+                .catch(err => {
+                    console.error('Save error:', err);
+                    showStatus('configStatus', '✗ Error saving configuration', 'error');
+                });
         }
         
         function updateSystemdTimer() {
@@ -1776,28 +1682,34 @@ func updateHandler(w http.ResponseWriter, r *http.Request) {
 		"message": "Update started! Building in background...",
 	})
 
-	// Run update in background (similar to manual update process)
+	// Run update in background (same as your working manual command)
 	go func() {
 		time.Sleep(1 * time.Second) // Give response time to send
 
+		log.Println("🔄 Starting update process...")
+		
 		cmd := exec.Command("bash", "-c", `
+			set -e
 			cd /opt/newslettar
+			echo "Backing up .env..."
 			cp .env .env.backup
-			wget -q -O main.go https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar/main.go || exit 1
-			wget -q -O go.mod https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar/go.mod || exit 1
-			/usr/local/go/bin/go build -o newslettar_new main.go || exit 1
+			echo "Downloading main.go..."
+			wget -O main.go https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar/main.go
+			echo "Downloading version.json..."
+			wget -O version.json https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar/version.json
+			echo "Building..."
+			/usr/local/go/bin/go build -o newslettar main.go
+			echo "Restoring .env..."
 			mv .env.backup .env
-			chmod +x newslettar_new
-			systemctl stop newslettar.service
-			mv newslettar newslettar.old
-			mv newslettar_new newslettar
-			systemctl start newslettar.service
-			rm -f newslettar.old
+			echo "Restarting service..."
+			systemctl restart newslettar.service
+			echo "Update complete!"
 		`)
 		
 		output, err := cmd.CombinedOutput()
+		log.Printf("Update output: %s", string(output))
 		if err != nil {
-			log.Printf("❌ Update failed: %v, output: %s", err, string(output))
+			log.Printf("❌ Update failed: %v", err)
 		} else {
 			log.Printf("✅ Update completed successfully")
 		}

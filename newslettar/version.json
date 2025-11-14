@@ -1,10 +1,9 @@
 {
-  "version": "1.0.5",
+  "version": "1.0.6",
   "released": "2025-11-14",
   "changelog": [
-    "Background updates - no more service interruption",
-    "UI stays responsive during updates",
-    "Auto-reload after update completes",
-    "Seamless update experience"
+    "Fixed binary replacement during updates",
+    "Service stops cleanly before binary swap",
+    "Update process more reliable"
   ]
 }

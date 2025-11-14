@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"net/smtp"
 	"os"
+	"regexp"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -63,7 +65,7 @@ func loadConfig() Config {
 		MailgunUser:  getEnv("MAILGUN_USER", ""),
 		MailgunPass:  getEnv("MAILGUN_PASS", ""),
 		FromEmail:    getEnv("FROM_EMAIL", "newsletter@example.com"),
-		ToEmails:     []string{getEnv("TO_EMAILS", "user@example.com")},
+		ToEmails:     strings.Split(getEnv("TO_EMAILS", "user@example.com"), ","),
 	}
 }
 
@@ -74,12 +76,67 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+var reSource = regexp.MustCompile(`(?i)(.*?)\.S(\d{2})E(\d{2}).*`)
+
+func cleanName(s string) string {
+	return strings.ReplaceAll(s, ".", " ")
+}
+
+func parseSeriesFromSource(src string) string {
+	m := reSource.FindStringSubmatch(src)
+	if len(m) >= 2 {
+		return cleanName(m[1])
+	}
+	return "Unknown Show"
+}
+
+func parseEpisodeTitleFromSource(src string) string {
+	// Cannot extract reliably from sourceTitle
+	return ""
+}
+
+func fetchSingleEpisode(cfg Config, id int) (struct {
+	Series struct {
+		Title string `json:"title"`
+	} `json:"series"`
+	SeasonNumber  int    `json:"seasonNumber"`
+	EpisodeNumber int    `json:"episodeNumber"`
+	Title         string `json:"title"`
+	AirDate       string `json:"airDate"`
+}, error) {
+
+	var episode struct {
+		Series struct {
+			Title string `json:"title"`
+		} `json:"series"`
+		SeasonNumber  int    `json:"seasonNumber"`
+		EpisodeNumber int    `json:"episodeNumber"`
+		Title         string `json:"title"`
+		AirDate       string `json:"airDate"`
+	}
+
+	url := fmt.Sprintf("%s/api/v3/episode/%d", cfg.SonarrURL, id)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("X-Api-Key", cfg.SonarrAPIKey)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return episode, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	err = json.Unmarshal(body, &episode)
+	return episode, err
+}
+
 func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
 	url := fmt.Sprintf("%s/api/v3/history?pageSize=1000&sortKey=date&sortDirection=descending", cfg.SonarrURL)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("X-Api-Key", cfg.SonarrAPIKey)
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -87,14 +144,15 @@ func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+
 	var result struct {
 		Records []struct {
-			SeriesID      int       `json:"seriesId"`
-			EpisodeID     int       `json:"episodeId"`
-			SourceTitle   string    `json:"sourceTitle"`
-			Date          time.Time `json:"date"`
-			EventType     string    `json:"eventType"`
-			Series        struct {
+			SeriesID    int       `json:"seriesId"`
+			EpisodeID   int       `json:"episodeId"`
+			SourceTitle string    `json:"sourceTitle"`
+			Date        time.Time `json:"date"`
+			EventType   string    `json:"eventType"`
+			Series      struct {
 				Title string `json:"title"`
 			} `json:"series"`
 			Episode struct {
@@ -114,20 +172,53 @@ func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
 	seen := make(map[string]bool)
 
 	for _, record := range result.Records {
-		if record.EventType == "downloadFolderImported" && record.Date.After(since) {
-			key := fmt.Sprintf("%d-%d-%d", record.SeriesID, record.Episode.SeasonNumber, record.Episode.EpisodeNumber)
-			if !seen[key] {
-				episodes = append(episodes, Episode{
-					SeriesTitle: record.Series.Title,
-					SeasonNum:   record.Episode.SeasonNumber,
-					EpisodeNum:  record.Episode.EpisodeNumber,
-					Title:       record.Episode.Title,
-					AirDate:     record.Episode.AirDate,
-					Downloaded:  true,
-				})
-				seen[key] = true
+		if record.EventType != "downloadFolderImported" {
+			continue
+		}
+		if record.Date.Before(since) {
+			continue
+		}
+
+		key := fmt.Sprintf("%d-%d", record.SeriesID, record.EpisodeID)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		seriesTitle := record.Series.Title
+		season := record.Episode.SeasonNumber
+		epNum := record.Episode.EpisodeNumber
+		epTitle := record.Episode.Title
+		air := record.Episode.AirDate
+
+		// Enrich if missing
+		if (seriesTitle == "" || season == 0 || epNum == 0) && record.EpisodeID != 0 {
+			enriched, err := fetchSingleEpisode(cfg, record.EpisodeID)
+			if err == nil {
+				seriesTitle = enriched.Series.Title
+				season = enriched.SeasonNumber
+				epNum = enriched.EpisodeNumber
+				epTitle = enriched.Title
+				air = enriched.AirDate
 			}
 		}
+
+		// Final fallback: parse from sourceTitle
+		if seriesTitle == "" {
+			seriesTitle = parseSeriesFromSource(record.SourceTitle)
+		}
+		if epTitle == "" {
+			epTitle = parseEpisodeTitleFromSource(record.SourceTitle)
+		}
+
+		episodes = append(episodes, Episode{
+			SeriesTitle: seriesTitle,
+			SeasonNum:   season,
+			EpisodeNum:  epNum,
+			Title:       epTitle,
+			AirDate:     air,
+			Downloaded:  true,
+		})
 	}
 
 	return episodes, nil
@@ -150,6 +241,7 @@ func fetchSonarrCalendar(cfg Config, start, end time.Time) ([]Episode, error) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+
 	var result []struct {
 		Series struct {
 			Title string `json:"title"`
@@ -192,6 +284,7 @@ func fetchRadarrHistory(cfg Config, since time.Time) ([]Movie, error) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+
 	var result struct {
 		Records []struct {
 			MovieID   int       `json:"movieId"`
@@ -242,6 +335,7 @@ func fetchRadarrCalendar(cfg Config, start, end time.Time) ([]Movie, error) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+
 	var result []struct {
 		Title           string `json:"title"`
 		Year            int    `json:"year"`
@@ -303,7 +397,9 @@ func generateHTML(data NewsletterData) (string, error) {
                 {{ range .DownloadedShows }}
                 <div class="item">
                     <div class="show-title">{{ .SeriesTitle }}</div>
-                    <div class="episode-info">S{{ printf "%02d" .SeasonNum }}E{{ printf "%02d" .EpisodeNum }} - {{ .Title }}</div>
+                    <div class="episode-info">
+                        S{{ printf "%02d" .SeasonNum }}E{{ printf "%02d" .EpisodeNum }} - {{ .Title }}
+                    </div>
                 </div>
                 {{ end }}
             {{ else }}
@@ -331,7 +427,9 @@ func generateHTML(data NewsletterData) (string, error) {
                 {{ range .UpcomingShows }}
                 <div class="item">
                     <div class="show-title">{{ .SeriesTitle }}</div>
-                    <div class="episode-info">S{{ printf "%02d" .SeasonNum }}E{{ printf "%02d" .EpisodeNum }} - {{ .Title }} ({{ .AirDate }})</div>
+                    <div class="episode-info">
+                        S{{ printf "%02d" .SeasonNum }}E{{ printf "%02d" .EpisodeNum }} - {{ .Title }} ({{ .AirDate }})
+                    </div>
                 </div>
                 {{ end }}
             {{ else }}
@@ -357,6 +455,7 @@ func generateHTML(data NewsletterData) (string, error) {
 </body>
 </html>
 `
+
 	t, err := template.New("newsletter").Parse(tmpl)
 	if err != nil {
 		return "", err
@@ -375,7 +474,7 @@ func sendEmail(cfg Config, subject, htmlBody string) error {
 
 	headers := make(map[string]string)
 	headers["From"] = cfg.FromEmail
-	headers["To"] = cfg.ToEmails[0]
+	headers["To"] = strings.Join(cfg.ToEmails, ",")
 	headers["Subject"] = subject
 	headers["MIME-Version"] = "1.0"
 	headers["Content-Type"] = "text/html; charset=\"utf-8\""
@@ -400,26 +499,12 @@ func main() {
 	nextWeek := now.AddDate(0, 0, 7)
 
 	log.Println("Fetching Sonarr data...")
-	downloadedShows, err := fetchSonarrHistory(cfg, weekAgo)
-	if err != nil {
-		log.Printf("Error fetching Sonarr history: %v", err)
-	}
-
-	upcomingShows, err := fetchSonarrCalendar(cfg, now, nextWeek)
-	if err != nil {
-		log.Printf("Error fetching Sonarr calendar: %v", err)
-	}
+	downloadedShows, _ := fetchSonarrHistory(cfg, weekAgo)
+	upcomingShows, _ := fetchSonarrCalendar(cfg, now, nextWeek)
 
 	log.Println("Fetching Radarr data...")
-	downloadedMovies, err := fetchRadarrHistory(cfg, weekAgo)
-	if err != nil {
-		log.Printf("Error fetching Radarr history: %v", err)
-	}
-
-	upcomingMovies, err := fetchRadarrCalendar(cfg, now, nextWeek)
-	if err != nil {
-		log.Printf("Error fetching Radarr calendar: %v", err)
-	}
+	downloadedMovies, _ := fetchRadarrHistory(cfg, weekAgo)
+	upcomingMovies, _ := fetchRadarrCalendar(cfg, now, nextWeek)
 
 	sort.Slice(downloadedShows, func(i, j int) bool {
 		return downloadedShows[i].SeriesTitle < downloadedShows[j].SeriesTitle

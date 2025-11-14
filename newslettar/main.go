@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -54,6 +55,10 @@ type NewsletterData struct {
 	UpcomingMovies   []Movie
 }
 
+//////////////////////////////////////////////////////////////////////////////////////
+// CONFIG
+//////////////////////////////////////////////////////////////////////////////////////
+
 func loadConfig() Config {
 	return Config{
 		SonarrURL:    getEnv("SONARR_URL", "http://localhost:8989"),
@@ -76,6 +81,10 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+//////////////////////////////////////////////////////////////////////////////////////
+// SONARR TITLE PARSING & ENRICHMENT
+//////////////////////////////////////////////////////////////////////////////////////
+
 var reSource = regexp.MustCompile(`(?i)(.*?)\.S(\d{2})E(\d{2}).*`)
 
 func cleanName(s string) string {
@@ -91,11 +100,16 @@ func parseSeriesFromSource(src string) string {
 }
 
 func parseEpisodeTitleFromSource(src string) string {
-	// Cannot extract reliably from sourceTitle
+	// cannot extract reliably
 	return ""
 }
 
-func fetchSingleEpisode(cfg Config, id int) (struct {
+func atoiSafe(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
+type SonarrEpisodeDetail struct {
 	Series struct {
 		Title string `json:"title"`
 	} `json:"series"`
@@ -103,17 +117,10 @@ func fetchSingleEpisode(cfg Config, id int) (struct {
 	EpisodeNumber int    `json:"episodeNumber"`
 	Title         string `json:"title"`
 	AirDate       string `json:"airDate"`
-}, error) {
+}
 
-	var episode struct {
-		Series struct {
-			Title string `json:"title"`
-		} `json:"series"`
-		SeasonNumber  int    `json:"seasonNumber"`
-		EpisodeNumber int    `json:"episodeNumber"`
-		Title         string `json:"title"`
-		AirDate       string `json:"airDate"`
-	}
+func fetchSingleEpisode(cfg Config, id int) (SonarrEpisodeDetail, error) {
+	var episode SonarrEpisodeDetail
 
 	url := fmt.Sprintf("%s/api/v3/episode/%d", cfg.SonarrURL, id)
 	req, _ := http.NewRequest("GET", url, nil)
@@ -131,8 +138,17 @@ func fetchSingleEpisode(cfg Config, id int) (struct {
 	return episode, err
 }
 
+//////////////////////////////////////////////////////////////////////////////////////
+// FETCH SONARR HISTORY — FULL FIXED VERSION
+//////////////////////////////////////////////////////////////////////////////////////
+
 func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
-	url := fmt.Sprintf("%s/api/v3/history?pageSize=1000&sortKey=date&sortDirection=descending", cfg.SonarrURL)
+
+	url := fmt.Sprintf(
+		"%s/api/v3/history?pageSize=500&sortDirection=descending&includeSeries=true&includeEpisode=true",
+		cfg.SonarrURL,
+	)
+
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("X-Api-Key", cfg.SonarrAPIKey)
 
@@ -152,9 +168,11 @@ func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
 			SourceTitle string    `json:"sourceTitle"`
 			Date        time.Time `json:"date"`
 			EventType   string    `json:"eventType"`
-			Series      struct {
+
+			Series struct {
 				Title string `json:"title"`
 			} `json:"series"`
+
 			Episode struct {
 				SeasonNumber  int    `json:"seasonNumber"`
 				EpisodeNumber int    `json:"episodeNumber"`
@@ -172,9 +190,16 @@ func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
 	seen := make(map[string]bool)
 
 	for _, record := range result.Records {
-		if record.EventType != "downloadFolderImported" {
+
+		ev := strings.ToLower(record.EventType)
+		valid := strings.Contains(ev, "import") ||
+			ev == "downloaded" ||
+			ev == "episodefileadded"
+
+		if !valid {
 			continue
 		}
+
 		if record.Date.Before(since) {
 			continue
 		}
@@ -191,24 +216,41 @@ func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
 		epTitle := record.Episode.Title
 		air := record.Episode.AirDate
 
-		// Enrich if missing
-		if (seriesTitle == "" || season == 0 || epNum == 0) && record.EpisodeID != 0 {
-			enriched, err := fetchSingleEpisode(cfg, record.EpisodeID)
+		// STEP 1 — If EpisodeID exists, get full detail
+		if record.EpisodeID > 0 {
+			full, err := fetchSingleEpisode(cfg, record.EpisodeID)
 			if err == nil {
-				seriesTitle = enriched.Series.Title
-				season = enriched.SeasonNumber
-				epNum = enriched.EpisodeNumber
-				epTitle = enriched.Title
-				air = enriched.AirDate
+				if full.Series.Title != "" {
+					seriesTitle = full.Series.Title
+				}
+				if full.SeasonNumber > 0 {
+					season = full.SeasonNumber
+				}
+				if full.EpisodeNumber > 0 {
+					epNum = full.EpisodeNumber
+				}
+				if full.Title != "" {
+					epTitle = full.Title
+				}
+				if full.AirDate != "" {
+					air = full.AirDate
+				}
 			}
 		}
 
-		// Final fallback: parse from sourceTitle
+		// STEP 2 — parse sourceTitle if still empty
 		if seriesTitle == "" {
 			seriesTitle = parseSeriesFromSource(record.SourceTitle)
 		}
 		if epTitle == "" {
 			epTitle = parseEpisodeTitleFromSource(record.SourceTitle)
+		}
+		if season == 0 || epNum == 0 {
+			m := reSource.FindStringSubmatch(record.SourceTitle)
+			if len(m) == 4 {
+				season = atoiSafe(m[2])
+				epNum = atoiSafe(m[3])
+			}
 		}
 
 		episodes = append(episodes, Episode{
@@ -223,6 +265,10 @@ func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
 
 	return episodes, nil
 }
+
+//////////////////////////////////////////////////////////////////////////////////////
+// SONARR CALENDAR
+//////////////////////////////////////////////////////////////////////////////////////
 
 func fetchSonarrCalendar(cfg Config, start, end time.Time) ([]Episode, error) {
 	url := fmt.Sprintf("%s/api/v3/calendar?start=%s&end=%s",
@@ -271,6 +317,10 @@ func fetchSonarrCalendar(cfg Config, start, end time.Time) ([]Episode, error) {
 	return episodes, nil
 }
 
+//////////////////////////////////////////////////////////////////////////////////////
+// RADARR HISTORY
+//////////////////////////////////////////////////////////////////////////////////////
+
 func fetchRadarrHistory(cfg Config, since time.Time) ([]Movie, error) {
 	url := fmt.Sprintf("%s/api/v3/history?pageSize=1000&sortKey=date&sortDirection=descending", cfg.RadarrURL)
 	req, _ := http.NewRequest("GET", url, nil)
@@ -305,18 +355,27 @@ func fetchRadarrHistory(cfg Config, since time.Time) ([]Movie, error) {
 	seen := make(map[int]bool)
 
 	for _, record := range result.Records {
-		if record.EventType == "downloadFolderImported" && record.Date.After(since) && !seen[record.MovieID] {
-			movies = append(movies, Movie{
-				Title:      record.Movie.Title,
-				Year:       record.Movie.Year,
-				Downloaded: true,
-			})
-			seen[record.MovieID] = true
+		if record.EventType == "movieFileImported" ||
+			record.EventType == "downloaded" ||
+			strings.Contains(strings.ToLower(record.EventType), "import") {
+
+			if record.Date.After(since) && !seen[record.MovieID] {
+				movies = append(movies, Movie{
+					Title:      record.Movie.Title,
+					Year:       record.Movie.Year,
+					Downloaded: true,
+				})
+				seen[record.MovieID] = true
+			}
 		}
 	}
 
 	return movies, nil
 }
+
+//////////////////////////////////////////////////////////////////////////////////////
+// RADARR CALENDAR
+//////////////////////////////////////////////////////////////////////////////////////
 
 func fetchRadarrCalendar(cfg Config, start, end time.Time) ([]Movie, error) {
 	url := fmt.Sprintf("%s/api/v3/calendar?start=%s&end=%s",
@@ -363,6 +422,10 @@ func fetchRadarrCalendar(cfg Config, start, end time.Time) ([]Movie, error) {
 
 	return movies, nil
 }
+
+//////////////////////////////////////////////////////////////////////////////////////
+// HTML TEMPLATE
+//////////////////////////////////////////////////////////////////////////////////////
 
 func generateHTML(data NewsletterData) (string, error) {
 	tmpl := `
@@ -469,6 +532,10 @@ func generateHTML(data NewsletterData) (string, error) {
 	return buf.String(), nil
 }
 
+//////////////////////////////////////////////////////////////////////////////////////
+// EMAIL SENDER
+//////////////////////////////////////////////////////////////////////////////////////
+
 func sendEmail(cfg Config, subject, htmlBody string) error {
 	auth := smtp.PlainAuth("", cfg.MailgunUser, cfg.MailgunPass, cfg.MailgunSMTP)
 
@@ -488,6 +555,10 @@ func sendEmail(cfg Config, subject, htmlBody string) error {
 	addr := fmt.Sprintf("%s:%s", cfg.MailgunSMTP, cfg.MailgunPort)
 	return smtp.SendMail(addr, auth, cfg.FromEmail, cfg.ToEmails, []byte(message))
 }
+
+//////////////////////////////////////////////////////////////////////////////////////
+// MAIN
+//////////////////////////////////////////////////////////////////////////////////////
 
 func main() {
 	cfg := loadConfig()

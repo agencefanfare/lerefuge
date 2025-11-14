@@ -65,16 +65,18 @@ type NewsletterData struct {
 }
 
 type WebConfig struct {
-	SonarrURL    string `json:"sonarr_url"`
-	SonarrAPIKey string `json:"sonarr_api_key"`
-	RadarrURL    string `json:"radarr_url"`
-	RadarrAPIKey string `json:"radarr_api_key"`
-	MailgunSMTP  string `json:"mailgun_smtp"`
-	MailgunPort  string `json:"mailgun_port"`
-	MailgunUser  string `json:"mailgun_user"`
-	MailgunPass  string `json:"mailgun_pass"`
-	FromEmail    string `json:"from_email"`
-	ToEmails     string `json:"to_emails"`
+	SonarrURL      string `json:"sonarr_url"`
+	SonarrAPIKey   string `json:"sonarr_api_key"`
+	RadarrURL      string `json:"radarr_url"`
+	RadarrAPIKey   string `json:"radarr_api_key"`
+	MailgunSMTP    string `json:"mailgun_smtp"`
+	MailgunPort    string `json:"mailgun_port"`
+	MailgunUser    string `json:"mailgun_user"`
+	MailgunPass    string `json:"mailgun_pass"`
+	FromEmail      string `json:"from_email"`
+	ToEmails       string `json:"to_emails"`
+	ScheduleDay    string `json:"schedule_day"`
+	ScheduleTime   string `json:"schedule_time"`
 }
 
 const version = "1.0.2"

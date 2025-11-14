@@ -2,110 +2,72 @@
 
 set -e
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-# Configuration
-INSTALL_DIR="/opt/newslettar"
-SERVICE_NAME="newslettar"
-GO_VERSION="1.23.5"
-
-echo -e "${GREEN}================================${NC}"
-echo -e "${GREEN}Newslettar Installer${NC}"
-echo -e "${GREEN}================================${NC}"
+echo -e "${GREEN}╔══════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║   Newslettar Installation Script    ║${NC}"
+echo -e "${GREEN}║        One-Click Setup v1.0          ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════╝${NC}"
 echo ""
 
-# Check if running as root
 if [ "$EUID" -ne 0 ]; then 
     echo -e "${RED}Please run as root (use sudo)${NC}"
     exit 1
 fi
 
-# Detect architecture
-ARCH=$(uname -m)
-case $ARCH in
-    x86_64)
-        GO_ARCH="amd64"
-        ;;
-    aarch64|arm64)
-        GO_ARCH="arm64"
-        ;;
-    armv7l)
-        GO_ARCH="armv6l"
-        ;;
-    *)
-        echo -e "${RED}Unsupported architecture: $ARCH${NC}"
-        exit 1
-        ;;
-esac
+INSTALL_DIR="/opt/newslettar"
+REPO_URL="https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar"
 
-echo -e "${YELLOW}Detected architecture: $ARCH (Go: $GO_ARCH)${NC}"
-
-# Update system
-echo -e "${YELLOW}[1/7] Updating system packages...${NC}"
+echo -e "${YELLOW}[1/8] Updating system...${NC}"
 apt-get update -qq
-apt-get install -y wget curl git ca-certificates >/dev/null 2>&1
+apt-get install -y wget curl ca-certificates >/dev/null 2>&1
+echo -e "${GREEN}✓ System updated${NC}"
 
-# Install Go if not present
+echo -e "${YELLOW}[2/8] Installing Go...${NC}"
 if ! command -v go &> /dev/null; then
-    echo -e "${YELLOW}[2/7] Installing Go ${GO_VERSION}...${NC}"
-    cd /tmp
-    wget -q https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz
-    tar -C /usr/local -xzf go${GO_VERSION}.linux-${GO_ARCH}.tar.gz
-    rm go${GO_VERSION}.linux-${GO_ARCH}.tar.gz
+    ARCH=$(uname -m)
+    case $ARCH in
+        x86_64) GO_ARCH="amd64" ;;
+        aarch64|arm64) GO_ARCH="arm64" ;;
+        armv7l) GO_ARCH="armv6l" ;;
+        *) echo -e "${RED}Unsupported architecture: $ARCH${NC}"; exit 1 ;;
+    esac
     
-    # Add Go to PATH
-    if ! grep -q "/usr/local/go/bin" /etc/profile; then
-        echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
-    fi
+    cd /tmp
+    wget -q https://go.dev/dl/go1.23.5.linux-${GO_ARCH}.tar.gz
+    tar -C /usr/local -xzf go1.23.5.linux-${GO_ARCH}.tar.gz
+    rm go1.23.5.linux-${GO_ARCH}.tar.gz
+    
+    echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
     export PATH=$PATH:/usr/local/go/bin
     
-    echo -e "${GREEN}✓ Go installed: $(go version)${NC}"
+    echo -e "${GREEN}✓ Go $(go version | awk '{print $3}') installed${NC}"
 else
-    echo -e "${GREEN}✓ Go already installed: $(go version)${NC}"
+    echo -e "${GREEN}✓ Go already installed: $(go version | awk '{print $3}')${NC}"
 fi
 
-# Create installation directory
-echo -e "${YELLOW}[3/7] Creating installation directory...${NC}"
+echo -e "${YELLOW}[3/8] Creating installation directory...${NC}"
 mkdir -p $INSTALL_DIR
 cd $INSTALL_DIR
+echo -e "${GREEN}✓ Directory created: $INSTALL_DIR${NC}"
 
-# Clone or download source
-echo -e "${YELLOW}[4/7] Downloading source code...${NC}"
-read -p "Enter GitHub repository URL (or press Enter to skip if files are already here): " REPO_URL
+echo -e "${YELLOW}[4/8] Downloading application...${NC}"
+wget -q -O main.go "$REPO_URL/main.go"
+wget -q -O go.mod "$REPO_URL/go.mod"
+echo -e "${GREEN}✓ Application downloaded${NC}"
 
-if [ ! -z "$REPO_URL" ]; then
-    # Clean directory if cloning
-    rm -rf $INSTALL_DIR/*
-    git clone $REPO_URL $INSTALL_DIR
-    echo -e "${GREEN}✓ Source code cloned${NC}"
-else
-    # Check if files exist
-    if [ ! -f "main.go" ] || [ ! -f "go.mod" ]; then
-        echo -e "${RED}Error: main.go and go.mod not found in $INSTALL_DIR${NC}"
-        echo -e "${YELLOW}Please either:${NC}"
-        echo "  1. Copy your files to $INSTALL_DIR first, or"
-        echo "  2. Run this script again with a GitHub repository URL"
-        exit 1
-    fi
-    echo -e "${GREEN}✓ Using existing source files${NC}"
-fi
-
-# Build the application
-echo -e "${YELLOW}[5/7] Building application...${NC}"
+echo -e "${YELLOW}[5/8] Building application...${NC}"
 go mod tidy
-go build -o newslettar-service main.go
-chmod +x newslettar-service
+go build -o newslettar main.go
+chmod +x newslettar
 echo -e "${GREEN}✓ Application built successfully${NC}"
 
-# Create configuration file
-echo -e "${YELLOW}[6/7] Setting up configuration...${NC}"
-
-if [ ! -f ".env" ]; then
-    cat > .env << 'EOF'
+echo -e "${YELLOW}[6/8] Creating configuration file...${NC}"
+cat > .env << 'EOF'
 # Sonarr Configuration
 SONARR_URL=http://localhost:8989
 SONARR_API_KEY=your_sonarr_api_key_here
@@ -114,31 +76,26 @@ SONARR_API_KEY=your_sonarr_api_key_here
 RADARR_URL=http://localhost:7878
 RADARR_API_KEY=your_radarr_api_key_here
 
-# Mailgun Configuration
+# Email Configuration (Mailgun)
 MAILGUN_SMTP=smtp.mailgun.org
 MAILGUN_PORT=587
 MAILGUN_USER=postmaster@your-domain.mailgun.org
-MAILGUN_PASS=your_mailgun_password
-
-# Email Configuration
+MAILGUN_PASS=your_mailgun_password_here
 FROM_EMAIL=newsletter@yourdomain.com
 TO_EMAILS=your-email@example.com
 
-# Timezone (optional)
-TZ=America/New_York
+# Web UI Port
+WEBUI_PORT=8080
 EOF
-    echo -e "${YELLOW}⚠ Created default .env file${NC}"
-    echo -e "${YELLOW}⚠ Please edit $INSTALL_DIR/.env with your actual credentials${NC}"
-else
-    echo -e "${GREEN}✓ Using existing .env file${NC}"
-fi
 
-# Create systemd service
-echo -e "${YELLOW}[7/7] Setting up systemd service...${NC}"
+echo -e "${GREEN}✓ Configuration file created${NC}"
 
-cat > /etc/systemd/system/${SERVICE_NAME}.service << EOF
+echo -e "${YELLOW}[7/8] Setting up systemd services...${NC}"
+
+# Newsletter service (for cron sending)
+cat > /etc/systemd/system/newslettar.service << EOF
 [Unit]
-Description=Newslettar - Media Newsletter Service
+Description=Newslettar Newsletter Service
 After=network.target
 
 [Service]
@@ -146,19 +103,19 @@ Type=oneshot
 User=root
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/.env
-ExecStart=$INSTALL_DIR/newslettar-service
-StandardOutput=append:/var/log/${SERVICE_NAME}.log
-StandardError=append:/var/log/${SERVICE_NAME}.log
+ExecStart=$INSTALL_DIR/newslettar
+StandardOutput=append:/var/log/newslettar.log
+StandardError=append:/var/log/newslettar.log
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Create systemd timer (runs every Sunday at 9 AM)
-cat > /etc/systemd/system/${SERVICE_NAME}.timer << EOF
+# Timer (runs every Sunday at 9 AM)
+cat > /etc/systemd/system/newslettar.timer << EOF
 [Unit]
-Description=Newslettar Timer
-Requires=${SERVICE_NAME}.service
+Description=Newslettar Weekly Timer
+Requires=newslettar.service
 
 [Timer]
 OnCalendar=Sun *-*-* 09:00:00
@@ -168,103 +125,104 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+# Web UI service
+cat > /etc/systemd/system/newslettar.service << EOF
+[Unit]
+Description=Newslettar Web UI and Newsletter Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$INSTALL_DIR/.env
+ExecStart=$INSTALL_DIR/newslettar -web
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 # Create log file
-touch /var/log/${SERVICE_NAME}.log
+touch /var/log/newslettar.log
 
-# Enable and start timer
+# Enable and start services
 systemctl daemon-reload
-systemctl enable ${SERVICE_NAME}.timer
-systemctl start ${SERVICE_NAME}.timer
+systemctl enable newslettar.timer
+systemctl enable newslettar.service
+systemctl start newslettar.timer
+systemctl start newslettar.service
 
-echo -e "${GREEN}✓ Systemd service and timer configured${NC}"
+echo -e "${GREEN}✓ Services configured and started${NC}"
 
-# Create helper script
-cat > $INSTALL_DIR/newslettar-ctl << 'EOF'
+echo -e "${YELLOW}[8/8] Creating management scripts...${NC}"
+
+# Helper script
+cat > /usr/local/bin/newslettar-ctl << 'CTLEOF'
 #!/bin/bash
-
-SERVICE_NAME="newslettar"
-
 case "$1" in
-    start)
-        echo "Starting newsletter timer..."
-        systemctl start ${SERVICE_NAME}.timer
-        ;;
-    stop)
-        echo "Stopping newsletter timer..."
-        systemctl stop ${SERVICE_NAME}.timer
-        ;;
-    restart)
-        echo "Restarting newsletter timer..."
-        systemctl restart ${SERVICE_NAME}.timer
-        ;;
-    status)
-        echo "=== Timer Status ==="
-        systemctl status ${SERVICE_NAME}.timer --no-pager
+    start) systemctl start newslettar.service ;;
+    stop) systemctl stop newslettar.service ;;
+    restart) systemctl restart newslettar.service ;;
+    status) 
+        systemctl status newslettar.service --no-pager
         echo ""
-        echo "=== Service Status ==="
-        systemctl status ${SERVICE_NAME}.service --no-pager
-        echo ""
-        echo "=== Next Run ==="
-        systemctl list-timers ${SERVICE_NAME}.timer --no-pager
+        systemctl list-timers newslettar.timer --no-pager
         ;;
-    logs)
-        tail -f /var/log/${SERVICE_NAME}.log
-        ;;
-    test)
-        echo "Running newsletter manually..."
+    logs) tail -f /var/log/newslettar.log ;;
+    test) 
         cd /opt/newslettar
-        set -a
         source .env
-        set +a
-        ./newslettar-service
+        ./newslettar
         ;;
-    edit)
-        ${EDITOR:-nano} /opt/newslettar/.env
+    edit) ${EDITOR:-nano} /opt/newslettar/.env ;;
+    web) 
+        IP=$(hostname -I | awk '{print $1}')
+        echo "Web UI: http://${IP}:8080"
         ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status|logs|test|edit}"
-        echo ""
-        echo "Commands:"
-        echo "  start   - Start the scheduled newsletter"
-        echo "  stop    - Stop the scheduled newsletter"
-        echo "  restart - Restart the timer"
-        echo "  status  - Show service status and next run time"
-        echo "  logs    - View newsletter logs"
-        echo "  test    - Run newsletter immediately (for testing)"
-        echo "  edit    - Edit configuration file"
+        echo "Usage: $0 {start|stop|restart|status|logs|test|edit|web}"
         exit 1
         ;;
 esac
-EOF
+CTLEOF
 
-chmod +x $INSTALL_DIR/newslettar-ctl
-ln -sf $INSTALL_DIR/newslettar-ctl /usr/local/bin/newslettar-ctl
+chmod +x /usr/local/bin/newslettar-ctl
+
+echo -e "${GREEN}✓ Management scripts created${NC}"
+
+# Get IP address
+IP=$(hostname -I | awk '{print $1}')
 
 echo ""
-echo -e "${GREEN}================================${NC}"
-echo -e "${GREEN}Installation Complete!${NC}"
-echo -e "${GREEN}================================${NC}"
+echo -e "${GREEN}╔══════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║     Installation Complete! 🎉       ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${YELLOW}Next Steps:${NC}"
+echo -e "${BLUE}┌─ Web UI Access ──────────────────────┐${NC}"
+echo -e "${BLUE}│${NC} ${GREEN}http://${IP}:8080${NC}"
+echo -e "${BLUE}│${NC} ${GREEN}http://localhost:8080${NC} (from this machine)"
+echo -e "${BLUE}└──────────────────────────────────────┘${NC}"
 echo ""
-echo "1. Edit your configuration:"
-echo -e "   ${GREEN}newslettar-ctl edit${NC}"
+echo -e "${YELLOW}Quick Start:${NC}"
+echo "  1. Open the Web UI in your browser"
+echo "  2. Configure your Sonarr/Radarr/Email settings"
+echo "  3. Test connections"
+echo "  4. Send a test newsletter!"
 echo ""
-echo "2. Add your API keys and email settings to the .env file"
-echo ""
-echo "3. Test the newsletter:"
-echo -e "   ${GREEN}newslettar-ctl test${NC}"
-echo ""
-echo "4. Check status and next run time:"
-echo -e "   ${GREEN}newslettar-ctl status${NC}"
-echo ""
-echo -e "${YELLOW}Scheduled Time:${NC} Every Sunday at 9:00 AM"
-echo ""
-echo -e "${YELLOW}Useful Commands:${NC}"
-echo "  newslettar-ctl status   - Check timer status"
+echo -e "${YELLOW}Command Line Tools:${NC}"
+echo "  newslettar-ctl status   - Check service status"
+echo "  newslettar-ctl test     - Send test newsletter"
 echo "  newslettar-ctl logs     - View logs"
-echo "  newslettar-ctl test     - Test immediately"
-echo "  newslettar-ctl edit     - Edit configuration"
+echo "  newslettar-ctl web      - Show Web UI URL"
+echo "  newslettar-ctl edit     - Edit config file"
 echo ""
-echo -e "${YELLOW}Log file:${NC} /var/log/${SERVICE_NAME}.log"
+echo -e "${YELLOW}Schedule:${NC}"
+echo "  Newsletters automatically send every Sunday at 9:00 AM"
+echo ""
+echo -e "${YELLOW}Update:${NC}"
+echo "  Use the 'Update' tab in the Web UI to update to the latest version"
+echo ""
+echo -e "${GREEN}Enjoy Newslettar! 📺${NC}"
 echo ""

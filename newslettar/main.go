@@ -1071,19 +1071,28 @@ func versionHandler(w http.ResponseWriter, r *http.Request) {
 
 func updateHandler(w http.ResponseWriter, r *http.Request) {
 	script := `#!/bin/bash
+set -e
 cd /opt/newslettar
+echo "Backing up configuration..."
 cp .env .env.backup
-wget -O main_new.go https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar/main.go
-if [ -f "main_new.go" ]; then
-    mv main_new.go main.go
-    go build -o newslettar main.go
-    mv .env.backup .env
-    systemctl restart newslettar.service
-    echo "Update complete"
-else
+echo "Downloading latest version..."
+wget -q -O main_new.go https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar/main.go
+if [ ! -f "main_new.go" ]; then
     echo "Download failed"
     exit 1
 fi
+echo "Building new version..."
+mv main_new.go main.go
+/usr/local/go/bin/go build -o newslettar main.go
+if [ ! -f "newslettar" ]; then
+    echo "Build failed"
+    exit 1
+fi
+echo "Restoring configuration..."
+mv .env.backup .env
+echo "Restarting service..."
+systemctl restart newslettar.service
+echo "Update complete!"
 `
 
 	tmpfile, _ := os.CreateTemp("", "update-*.sh")
@@ -1095,10 +1104,16 @@ fi
 	output, err := cmd.CombinedOutput()
 	os.Remove(tmpfile.Name())
 
+	success := err == nil
+	message := "Update completed successfully! Page will reload..."
+	if !success {
+		message = "Update failed: " + string(output)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": err == nil,
-		"message": "Update " + map[bool]string{true: "successful", false: "failed"}[err == nil],
+		"success": success,
+		"message": message,
 		"output":  string(output),
 	})
 }

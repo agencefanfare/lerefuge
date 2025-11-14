@@ -1,9 +1,18 @@
 {
-  "version": "1.0.7",
-  "released": "2025-01-27",
+  "version": "1.0.8",
+  "released": "2025-11-14",
   "changelog": [
-    "Updated UI to dark greyish theme",
-    "Improved contrast and readability",
-    "Dark theme applied to all UI elements including forms, buttons, and status boxes"
+    "Fixed schedule not updating - now properly saves and applies timer changes",
+    "Removed redundant 'Next newsletter' info from Actions tab",
+    "Fixed logs not auto-refreshing - now updates every 5 seconds when viewing",
+    "Fixed Update button - now properly downloads, builds, and restarts service",
+    "Added individual test connection buttons for Sonarr, Radarr, and Email in Configuration tab",
+    "Added email sender name field to customize 'From' display name",
+    "Added IMDB links for all movies, series, and episodes",
+    "Releases now sorted chronologically with day of week displayed",
+    "Notifications now persist longer (10 seconds instead of 5)",
+    "Logs now show last 200 lines instead of 100",
+    "Improved error handling and user feedback throughout",
+    "Updated UI colors to darker greyish theme for better contrast"
   ]
 }

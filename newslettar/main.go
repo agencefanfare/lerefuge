@@ -19,16 +19,17 @@ import (
 
 // Config structures
 type Config struct {
-	SonarrURL    string
-	SonarrAPIKey string
-	RadarrURL    string
-	RadarrAPIKey string
-	MailgunSMTP  string
-	MailgunPort  string
-	MailgunUser  string
-	MailgunPass  string
-	FromEmail    string
-	ToEmails     []string
+	SonarrURL      string
+	SonarrAPIKey   string
+	RadarrURL      string
+	RadarrAPIKey   string
+	MailgunSMTP    string
+	MailgunPort    string
+	MailgunUser    string
+	MailgunPass    string
+	FromEmail      string
+	FromName       string
+	ToEmails       []string
 }
 
 type Episode struct {
@@ -39,6 +40,8 @@ type Episode struct {
 	AirDate     string
 	Downloaded  bool
 	PosterURL   string
+	IMDBID      string
+	TvdbID      int
 }
 
 type Movie struct {
@@ -47,12 +50,16 @@ type Movie struct {
 	ReleaseDate string
 	Downloaded  bool
 	PosterURL   string
+	IMDBID      string
+	TmdbID      int
 }
 
 type SeriesGroup struct {
 	SeriesTitle string
 	PosterURL   string
 	Episodes    []Episode
+	IMDBID      string
+	TvdbID      int
 }
 
 type NewsletterData struct {
@@ -74,12 +81,13 @@ type WebConfig struct {
 	MailgunUser    string `json:"mailgun_user"`
 	MailgunPass    string `json:"mailgun_pass"`
 	FromEmail      string `json:"from_email"`
+	FromName       string `json:"from_name"`
 	ToEmails       string `json:"to_emails"`
 	ScheduleDay    string `json:"schedule_day"`
 	ScheduleTime   string `json:"schedule_time"`
 }
 
-const version = "1.0.7"
+const version = "1.0.8"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")
@@ -100,102 +108,84 @@ func runNewsletter() {
 	log.Printf("Config: Sonarr=%s, Radarr=%s", cfg.SonarrURL, cfg.RadarrURL)
 
 	now := time.Now()
-	weekAgo := now.AddDate(0, 0, -7)
-	nextWeek := now.AddDate(0, 0, 7)
+	weekStart := now.AddDate(0, 0, -7)
+	weekEnd := now
 
-	log.Println("📡 Fetching Sonarr data...")
-	downloadedShows, err := fetchSonarrHistory(cfg, weekAgo)
-	if err != nil {
-		log.Printf("⚠️  Error fetching Sonarr history: %v", err)
-		downloadedShows = []Episode{}
-	} else {
-		log.Printf("✓ Found %d downloaded episodes", len(downloadedShows))
-	}
+	log.Printf("📅 Week range: %s to %s", weekStart.Format("2006-01-02"), weekEnd.Format("2006-01-02"))
 
-	upcomingShows, err := fetchSonarrCalendar(cfg, now, nextWeek)
+	// Fetch data
+	log.Println("📺 Fetching Sonarr data...")
+	downloadedEpisodes, err := fetchSonarrHistory(cfg, weekStart)
 	if err != nil {
-		log.Printf("⚠️  Error fetching Sonarr calendar: %v", err)
-		upcomingShows = []Episode{}
-	} else {
-		log.Printf("✓ Found %d upcoming episodes", len(upcomingShows))
+		log.Printf("⚠️  Warning: Sonarr history error: %v", err)
 	}
+	log.Printf("   Found %d downloaded episodes", len(downloadedEpisodes))
+
+	upcomingEpisodes, err := fetchSonarrCalendar(cfg, weekEnd, weekEnd.AddDate(0, 0, 7))
+	if err != nil {
+		log.Printf("⚠️  Warning: Sonarr calendar error: %v", err)
+	}
+	log.Printf("   Found %d upcoming episodes", len(upcomingEpisodes))
 
 	log.Println("🎬 Fetching Radarr data...")
-	downloadedMovies, err := fetchRadarrHistory(cfg, weekAgo)
+	downloadedMovies, err := fetchRadarrHistory(cfg, weekStart)
 	if err != nil {
-		log.Printf("⚠️  Error fetching Radarr history: %v", err)
-		downloadedMovies = []Movie{}
-	} else {
-		log.Printf("✓ Found %d downloaded movies", len(downloadedMovies))
+		log.Printf("⚠️  Warning: Radarr history error: %v", err)
 	}
+	log.Printf("   Found %d downloaded movies", len(downloadedMovies))
 
-	upcomingMovies, err := fetchRadarrCalendar(cfg, now, nextWeek)
+	upcomingMovies, err := fetchRadarrCalendar(cfg, weekEnd, weekEnd.AddDate(0, 0, 7))
 	if err != nil {
-		log.Printf("⚠️  Error fetching Radarr calendar: %v", err)
-		upcomingMovies = []Movie{}
-	} else {
-		log.Printf("✓ Found %d upcoming movies", len(upcomingMovies))
+		log.Printf("⚠️  Warning: Radarr calendar error: %v", err)
 	}
+	log.Printf("   Found %d upcoming movies", len(upcomingMovies))
 
-	log.Println("📊 Grouping episodes by series...")
-	downloadedSeriesGroups := groupEpisodesBySeries(downloadedShows)
-	upcomingSeriesGroups := groupEpisodesBySeries(upcomingShows)
-
-	log.Printf("✓ Grouped into %d downloaded series and %d upcoming series",
-		len(downloadedSeriesGroups), len(upcomingSeriesGroups))
-
-	sort.Slice(downloadedMovies, func(i, j int) bool {
-		return downloadedMovies[i].Title < downloadedMovies[j].Title
-	})
+	// Sort movies by release date chronologically (oldest first)
 	sort.Slice(upcomingMovies, func(i, j int) bool {
-		if upcomingMovies[i].ReleaseDate == upcomingMovies[j].ReleaseDate {
-			return upcomingMovies[i].Title < upcomingMovies[j].Title
-		}
 		return upcomingMovies[i].ReleaseDate < upcomingMovies[j].ReleaseDate
+	})
+	sort.Slice(downloadedMovies, func(i, j int) bool {
+		return downloadedMovies[i].ReleaseDate < downloadedMovies[j].ReleaseDate
 	})
 
 	data := NewsletterData{
-		WeekStart:              weekAgo.Format("Jan 2"),
-		WeekEnd:                now.Format("Jan 2, 2006"),
-		UpcomingSeriesGroups:   upcomingSeriesGroups,
+		WeekStart:              weekStart.Format("January 2, 2006"),
+		WeekEnd:                weekEnd.Format("January 2, 2006"),
+		UpcomingSeriesGroups:   groupEpisodesBySeries(upcomingEpisodes),
 		UpcomingMovies:         upcomingMovies,
-		DownloadedSeriesGroups: downloadedSeriesGroups,
+		DownloadedSeriesGroups: groupEpisodesBySeries(downloadedEpisodes),
 		DownloadedMovies:       downloadedMovies,
 	}
 
-	log.Println("📝 Generating HTML...")
-	html, err := generateHTML(data)
+	log.Println("📝 Generating newsletter HTML...")
+	html, err := generateNewsletterHTML(data)
 	if err != nil {
-		log.Fatalf("❌ Error generating HTML: %v", err)
+		log.Fatalf("❌ Failed to generate HTML: %v", err)
 	}
 
-	subject := fmt.Sprintf("Newslettar - Week of %s", now.Format("Jan 2, 2006"))
+	subject := fmt.Sprintf("📺 Your Weekly Newsletter - %s", weekEnd.Format("January 2, 2006"))
 
-	log.Println("📧 Sending email...")
+	log.Println("📧 Sending emails...")
 	if err := sendEmail(cfg, subject, html); err != nil {
-		log.Fatalf("❌ Error sending email: %v", err)
+		log.Fatalf("❌ Failed to send email: %v", err)
 	}
 
 	log.Println("✅ Newsletter sent successfully!")
 }
 
 func loadConfig() Config {
-	toEmails := strings.Split(getEnv("TO_EMAILS", "user@example.com"), ",")
-	for i := range toEmails {
-		toEmails[i] = strings.TrimSpace(toEmails[i])
-	}
-
 	return Config{
-		SonarrURL:    getEnv("SONARR_URL", "http://localhost:8989"),
+		SonarrURL:    getEnv("SONARR_URL", ""),
 		SonarrAPIKey: getEnv("SONARR_API_KEY", ""),
-		RadarrURL:    getEnv("RADARR_URL", "http://localhost:7878"),
+		RadarrURL:    getEnv("RADARR_URL", ""),
 		RadarrAPIKey: getEnv("RADARR_API_KEY", ""),
 		MailgunSMTP:  getEnv("MAILGUN_SMTP", "smtp.mailgun.org"),
 		MailgunPort:  getEnv("MAILGUN_PORT", "587"),
 		MailgunUser:  getEnv("MAILGUN_USER", ""),
 		MailgunPass:  getEnv("MAILGUN_PASS", ""),
-		FromEmail:    getEnv("FROM_EMAIL", "newsletter@example.com"),
-		ToEmails:     toEmails,
+		FromEmail:    getEnv("FROM_EMAIL", ""),
+		FromName:     getEnv("FROM_NAME", "Newslettar"),
+		ToEmails:     strings.Split(getEnv("TO_EMAILS", ""), ","),
 	}
 }
 
@@ -215,6 +205,8 @@ func groupEpisodesBySeries(episodes []Episode) []SeriesGroup {
 				SeriesTitle: ep.SeriesTitle,
 				PosterURL:   ep.PosterURL,
 				Episodes:    []Episode{},
+				IMDBID:      ep.IMDBID,
+				TvdbID:      ep.TvdbID,
 			}
 		}
 		seriesMap[ep.SeriesTitle].Episodes = append(seriesMap[ep.SeriesTitle].Episodes, ep)
@@ -222,7 +214,11 @@ func groupEpisodesBySeries(episodes []Episode) []SeriesGroup {
 
 	var groups []SeriesGroup
 	for _, group := range seriesMap {
+		// Sort episodes by air date chronologically (oldest first)
 		sort.Slice(group.Episodes, func(i, j int) bool {
+			if group.Episodes[i].AirDate != group.Episodes[j].AirDate {
+				return group.Episodes[i].AirDate < group.Episodes[j].AirDate
+			}
 			if group.Episodes[i].SeasonNum != group.Episodes[j].SeasonNum {
 				return group.Episodes[i].SeasonNum < group.Episodes[j].SeasonNum
 			}
@@ -265,8 +261,10 @@ func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
 			Date        time.Time `json:"date"`
 			EventType   string    `json:"eventType"`
 			Series      struct {
-				Title  string `json:"title"`
-				Images []struct {
+				Title       string `json:"title"`
+				ImdbId      string `json:"imdbId"`
+				TvdbId      int    `json:"tvdbId"`
+				Images      []struct {
 					CoverType string `json:"coverType"`
 					URL       string `json:"url"`
 					RemoteURL string `json:"remoteUrl"`
@@ -312,6 +310,8 @@ func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
 					AirDate:     record.Episode.AirDate,
 					Downloaded:  true,
 					PosterURL:   posterURL,
+					IMDBID:      record.Series.ImdbId,
+					TvdbID:      record.Series.TvdbId,
 				})
 				seen[key] = true
 			}
@@ -346,8 +346,10 @@ func fetchSonarrCalendar(cfg Config, start, end time.Time) ([]Episode, error) {
 
 	var result []struct {
 		Series struct {
-			Title  string `json:"title"`
-			Images []struct {
+			Title       string `json:"title"`
+			ImdbId      string `json:"imdbId"`
+			TvdbId      int    `json:"tvdbId"`
+			Images      []struct {
 				CoverType string `json:"coverType"`
 				URL       string `json:"url"`
 				RemoteURL string `json:"remoteUrl"`
@@ -385,6 +387,8 @@ func fetchSonarrCalendar(cfg Config, start, end time.Time) ([]Episode, error) {
 			AirDate:     ep.AirDate,
 			Downloaded:  false,
 			PosterURL:   posterURL,
+			IMDBID:      ep.Series.ImdbId,
+			TvdbID:      ep.Series.TvdbId,
 		})
 	}
 
@@ -412,13 +416,19 @@ func fetchRadarrHistory(cfg Config, since time.Time) ([]Movie, error) {
 
 	var result struct {
 		Records []struct {
-			MovieID   int       `json:"movieId"`
-			Date      time.Time `json:"date"`
-			EventType string    `json:"eventType"`
-			Movie     struct {
-				Title  string `json:"title"`
-				Year   int    `json:"year"`
-				Images []struct {
+			MovieID     int       `json:"movieId"`
+			SourceTitle string    `json:"sourceTitle"`
+			Date        time.Time `json:"date"`
+			EventType   string    `json:"eventType"`
+			Movie       struct {
+				Title         string `json:"title"`
+				Year          int    `json:"year"`
+				ImdbId        string `json:"imdbId"`
+				TmdbId        int    `json:"tmdbId"`
+				PhysicalRelease string `json:"physicalRelease"`
+				DigitalRelease  string `json:"digitalRelease"`
+				InCinemas       string `json:"inCinemas"`
+				Images        []struct {
 					CoverType string `json:"coverType"`
 					URL       string `json:"url"`
 					RemoteURL string `json:"remoteUrl"`
@@ -435,26 +445,39 @@ func fetchRadarrHistory(cfg Config, since time.Time) ([]Movie, error) {
 	seen := make(map[int]bool)
 
 	for _, record := range result.Records {
-		if record.EventType == "downloadFolderImported" && record.Date.After(since) && !seen[record.MovieID] {
-			posterURL := ""
-			for _, img := range record.Movie.Images {
-				if img.CoverType == "poster" {
-					if img.RemoteURL != "" {
-						posterURL = img.RemoteURL
-					} else if img.URL != "" {
-						posterURL = cfg.RadarrURL + img.URL
+		if record.EventType == "downloadFolderImported" && record.Date.After(since) {
+			if !seen[record.MovieID] {
+				posterURL := ""
+				for _, img := range record.Movie.Images {
+					if img.CoverType == "poster" {
+						if img.RemoteURL != "" {
+							posterURL = img.RemoteURL
+						} else if img.URL != "" {
+							posterURL = cfg.RadarrURL + img.URL
+						}
+						break
 					}
-					break
 				}
-			}
 
-			movies = append(movies, Movie{
-				Title:      record.Movie.Title,
-				Year:       record.Movie.Year,
-				Downloaded: true,
-				PosterURL:  posterURL,
-			})
-			seen[record.MovieID] = true
+				releaseDate := record.Movie.DigitalRelease
+				if releaseDate == "" {
+					releaseDate = record.Movie.PhysicalRelease
+				}
+				if releaseDate == "" {
+					releaseDate = record.Movie.InCinemas
+				}
+
+				movies = append(movies, Movie{
+					Title:       record.Movie.Title,
+					Year:        record.Movie.Year,
+					ReleaseDate: releaseDate,
+					Downloaded:  true,
+					PosterURL:   posterURL,
+					IMDBID:      record.Movie.ImdbId,
+					TmdbID:      record.Movie.TmdbId,
+				})
+				seen[record.MovieID] = true
+			}
 		}
 	}
 
@@ -487,8 +510,11 @@ func fetchRadarrCalendar(cfg Config, start, end time.Time) ([]Movie, error) {
 	var result []struct {
 		Title           string `json:"title"`
 		Year            int    `json:"year"`
+		ImdbId          string `json:"imdbId"`
+		TmdbId          int    `json:"tmdbId"`
 		PhysicalRelease string `json:"physicalRelease"`
 		DigitalRelease  string `json:"digitalRelease"`
+		InCinemas       string `json:"inCinemas"`
 		Images          []struct {
 			CoverType string `json:"coverType"`
 			URL       string `json:"url"`
@@ -501,14 +527,9 @@ func fetchRadarrCalendar(cfg Config, start, end time.Time) ([]Movie, error) {
 	}
 
 	var movies []Movie
-	for _, m := range result {
-		releaseDate := m.DigitalRelease
-		if releaseDate == "" {
-			releaseDate = m.PhysicalRelease
-		}
-
+	for _, movie := range result {
 		posterURL := ""
-		for _, img := range m.Images {
+		for _, img := range movie.Images {
 			if img.CoverType == "poster" {
 				if img.RemoteURL != "" {
 					posterURL = img.RemoteURL
@@ -519,108 +540,194 @@ func fetchRadarrCalendar(cfg Config, start, end time.Time) ([]Movie, error) {
 			}
 		}
 
+		releaseDate := movie.DigitalRelease
+		if releaseDate == "" {
+			releaseDate = movie.PhysicalRelease
+		}
+		if releaseDate == "" {
+			releaseDate = movie.InCinemas
+		}
+
 		movies = append(movies, Movie{
-			Title:       m.Title,
-			Year:        m.Year,
+			Title:       movie.Title,
+			Year:        movie.Year,
 			ReleaseDate: releaseDate,
 			Downloaded:  false,
 			PosterURL:   posterURL,
+			IMDBID:      movie.ImdbId,
+			TmdbID:      movie.TmdbId,
 		})
 	}
 
 	return movies, nil
 }
 
-func generateHTML(data NewsletterData) (string, error) {
+// Helper function to format date with day of week
+func formatDateWithDay(dateStr string) string {
+	if dateStr == "" {
+		return "Date TBA"
+	}
+	t, err := time.Parse("2006-01-02T15:04:05Z", dateStr)
+	if err != nil {
+		t, err = time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			return dateStr
+		}
+	}
+	return t.Format("Monday, January 2, 2006")
+}
+
+func generateNewsletterHTML(data NewsletterData) (string, error) {
 	tmpl := `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Weekly Newsletter</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
-        .container { background-color: white; padding: 30px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; margin-bottom: 10px; }
-        h2 { color: #34495e; margin-top: 40px; border-left: 4px solid #3498db; padding-left: 15px; }
-        h3 { color: #2c3e50; margin-top: 25px; margin-bottom: 15px; font-size: 1.2em; }
-        .section { margin-bottom: 30px; }
-        .series-group { margin-bottom: 25px; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; background-color: #fafafa; }
-        .series-header { display: flex; align-items: center; padding: 15px; background-color: #f0f0f0; border-bottom: 2px solid #3498db; }
-        .poster { width: 60px; height: 90px; object-fit: cover; border-radius: 4px; margin-right: 15px; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-        .poster-placeholder { width: 60px; height: 90px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 4px; margin-right: 15px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 28px; color: white; }
-        .series-title { font-weight: bold; font-size: 1.3em; color: #2c3e50; }
-        .episode-list { padding: 10px 15px; }
-        .episode-item { padding: 10px; margin: 5px 0; background-color: white; border-left: 3px solid #3498db; border-radius: 4px; }
-        .episode-number { font-weight: 600; color: #3498db; display: inline-block; min-width: 70px; }
-        .episode-title { color: #2c3e50; }
-        .episode-date { color: #7f8c8d; font-size: 0.9em; margin-left: 10px; }
-        .movie-item { display: flex; padding: 15px; margin: 12px 0; background-color: #f8f9fa; border-left: 3px solid #e74c3c; border-radius: 8px; align-items: flex-start; transition: transform 0.2s; }
-        .movie-item:hover { transform: translateX(5px); background-color: #e9ecef; }
-        .movie-poster { width: 80px; height: 120px; object-fit: cover; border-radius: 6px; margin-right: 15px; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-        .movie-poster-placeholder { width: 80px; height: 120px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 6px; margin-right: 15px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 36px; color: white; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 700px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px 30px; text-align: center; }
+        .header h1 { font-size: 2.2em; margin-bottom: 10px; }
+        .header p { opacity: 0.95; font-size: 1.1em; }
+        .content { padding: 30px; }
+        .section { margin-bottom: 40px; }
+        h2 { color: #2c3e50; margin-bottom: 20px; font-size: 1.8em; display: flex; align-items: center; gap: 10px; }
+        h3 { color: #34495e; margin: 30px 0 15px; font-size: 1.4em; display: flex; align-items: center; gap: 10px; }
+        .count-badge { background: #667eea; color: white; border-radius: 20px; padding: 4px 12px; font-size: 0.8em; font-weight: normal; }
+        .series-group { margin-bottom: 30px; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; }
+        .series-header { background: #f8f9fa; padding: 15px; display: flex; align-items: center; gap: 15px; border-bottom: 2px solid #e0e0e0; }
+        .poster { width: 60px; height: 90px; object-fit: cover; border-radius: 4px; }
+        .poster-placeholder { width: 60px; height: 90px; background: #e0e0e0; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 2em; }
+        .series-title { font-size: 1.3em; font-weight: 600; color: #2c3e50; flex: 1; }
+        .series-title a { color: #667eea; text-decoration: none; }
+        .series-title a:hover { text-decoration: underline; }
+        .episode-list { padding: 0; }
+        .episode-item { padding: 12px 20px; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; gap: 15px; }
+        .episode-item:last-child { border-bottom: none; }
+        .episode-number { background: #667eea; color: white; padding: 4px 10px; border-radius: 4px; font-weight: 600; font-size: 0.85em; min-width: 70px; text-align: center; }
+        .episode-title { color: #34495e; flex: 1; }
+        .episode-date { color: #7f8c8d; font-size: 0.9em; }
+        .movie-item { display: flex; align-items: center; gap: 15px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 15px; }
+        .movie-poster { width: 80px; height: 120px; object-fit: cover; border-radius: 4px; }
+        .movie-poster-placeholder { width: 80px; height: 120px; background: #e0e0e0; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 3em; }
         .movie-content { flex: 1; }
-        .movie-title { font-weight: bold; color: #2c3e50; font-size: 1.1em; }
+        .movie-title { font-size: 1.2em; font-weight: 600; color: #2c3e50; margin-bottom: 5px; }
+        .movie-title a { color: #667eea; text-decoration: none; }
+        .movie-title a:hover { text-decoration: underline; }
         .movie-year { color: #7f8c8d; font-size: 0.95em; }
-        .date-range { color: #7f8c8d; font-size: 0.95em; margin-bottom: 20px; }
-        .empty { color: #95a5a6; font-style: italic; padding: 15px; text-align: center; background-color: #f8f9fa; border-radius: 6px; }
-        .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; color: #7f8c8d; font-size: 0.85em; text-align: center; }
-        .count-badge { background-color: #3498db; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.85em; margin-left: 10px; font-weight: normal; }
-        .downloaded-section { margin-top: 50px; padding-top: 30px; border-top: 2px dashed #e0e0e0; }
-        .downloaded-section h2 { color: #7f8c8d; border-left-color: #95a5a6; }
+        .movie-date { color: #7f8c8d; font-size: 0.9em; margin-top: 5px; }
+        .empty { text-align: center; padding: 30px; color: #95a5a6; font-style: italic; }
+        .footer { text-align: center; padding: 20px; color: #7f8c8d; font-size: 0.9em; background: #f8f9fa; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📺 Newslettar</h1>
-        <div class="date-range">Week of {{ .WeekStart }} - {{ .WeekEnd }}</div>
-        <div class="section">
-            <h2>📅 Coming Next Week</h2>
-            <h3>TV Shows <span class="count-badge">{{ len .UpcomingSeriesGroups }}</span></h3>
-            {{ if .UpcomingSeriesGroups }}
-                {{ range .UpcomingSeriesGroups }}
-                <div class="series-group">
-                    <div class="series-header">
-                        {{ if .PosterURL }}<img src="{{ .PosterURL }}" alt="{{ .SeriesTitle }}" class="poster" />{{ else }}<div class="poster-placeholder">📺</div>{{ end }}
-                        <div class="series-title">{{ .SeriesTitle }} <span style="color: #7f8c8d; font-size: 0.8em; font-weight: normal;">({{ len .Episodes }} episode{{ if gt (len .Episodes) 1 }}s{{ end }})</span></div>
-                    </div>
-                    <div class="episode-list">
-                        {{ range .Episodes }}<div class="episode-item"><span class="episode-number">S{{ printf "%02d" .SeasonNum }}E{{ printf "%02d" .EpisodeNum }}</span><span class="episode-title">{{ if .Title }}{{ .Title }}{{ else }}TBA{{ end }}</span>{{ if .AirDate }}<span class="episode-date">{{ .AirDate }}</span>{{ end }}</div>{{ end }}
-                    </div>
-                </div>
-                {{ end }}
-            {{ else }}<div class="empty">No shows scheduled for next week</div>{{ end }}
-            <h3>Movies <span class="count-badge">{{ len .UpcomingMovies }}</span></h3>
-            {{ if .UpcomingMovies }}
-                {{ range .UpcomingMovies }}<div class="movie-item">{{ if .PosterURL }}<img src="{{ .PosterURL }}" alt="{{ .Title }}" class="movie-poster" />{{ else }}<div class="movie-poster-placeholder">🎬</div>{{ end }}<div class="movie-content"><div class="movie-title">{{ .Title }}</div><div class="movie-year">({{ .Year }}){{ if .ReleaseDate }} • {{ .ReleaseDate }}{{ end }}</div></div></div>{{ end }}
-            {{ else }}<div class="empty">No movies scheduled for next week</div>{{ end }}
+        <div class="header">
+            <h1>📺 Your Weekly Newsletter</h1>
+            <p>{{ .WeekStart }} - {{ .WeekEnd }}</p>
         </div>
-        <div class="section downloaded-section">
-            <h2>📥 Downloaded Last Week</h2>
-            <h3>TV Shows <span class="count-badge">{{ len .DownloadedSeriesGroups }}</span></h3>
-            {{ if .DownloadedSeriesGroups }}
-                {{ range .DownloadedSeriesGroups }}
-                <div class="series-group">
-                    <div class="series-header">
-                        {{ if .PosterURL }}<img src="{{ .PosterURL }}" alt="{{ .SeriesTitle }}" class="poster" />{{ else }}<div class="poster-placeholder">📺</div>{{ end }}
-                        <div class="series-title">{{ .SeriesTitle }} <span style="color: #7f8c8d; font-size: 0.8em; font-weight: normal;">({{ len .Episodes }} episode{{ if gt (len .Episodes) 1 }}s{{ end }})</span></div>
+        <div class="content">
+            <div class="section">
+                <h2>🎬 Coming This Week</h2>
+                <h3>TV Shows <span class="count-badge">{{ len .UpcomingSeriesGroups }}</span></h3>
+                {{ if .UpcomingSeriesGroups }}
+                    {{ range .UpcomingSeriesGroups }}
+                    <div class="series-group">
+                        <div class="series-header">
+                            {{ if .PosterURL }}<img src="{{ .PosterURL }}" alt="{{ .SeriesTitle }}" class="poster" />{{ else }}<div class="poster-placeholder">📺</div>{{ end }}
+                            <div class="series-title">
+                                {{ if .IMDBID }}<a href="https://www.imdb.com/title/{{ .IMDBID }}/" target="_blank">{{ .SeriesTitle }}</a>{{ else }}{{ .SeriesTitle }}{{ end }}
+                                <span style="color: #7f8c8d; font-size: 0.8em; font-weight: normal;">({{ len .Episodes }} episode{{ if gt (len .Episodes) 1 }}s{{ end }})</span>
+                            </div>
+                        </div>
+                        <div class="episode-list">
+                            {{ range .Episodes }}
+                            <div class="episode-item">
+                                <span class="episode-number">S{{ printf "%02d" .SeasonNum }}E{{ printf "%02d" .EpisodeNum }}</span>
+                                <span class="episode-title">{{ if .Title }}{{ .Title }}{{ else }}Episode {{ .EpisodeNum }}{{ end }}</span>
+                                <span class="episode-date">{{ if .AirDate }}{{ formatDateWithDay .AirDate }}{{ end }}</span>
+                            </div>
+                            {{ end }}
+                        </div>
                     </div>
-                    <div class="episode-list">
-                        {{ range .Episodes }}<div class="episode-item"><span class="episode-number">S{{ printf "%02d" .SeasonNum }}E{{ printf "%02d" .EpisodeNum }}</span><span class="episode-title">{{ if .Title }}{{ .Title }}{{ else }}Episode {{ .EpisodeNum }}{{ end }}</span></div>{{ end }}
-                    </div>
-                </div>
+                    {{ end }}
+                {{ else }}
+                    <div class="empty">No new shows airing this week</div>
                 {{ end }}
-            {{ else }}<div class="empty">No shows downloaded this week</div>{{ end }}
-            <h3>Movies <span class="count-badge">{{ len .DownloadedMovies }}</span></h3>
-            {{ if .DownloadedMovies }}
-                {{ range .DownloadedMovies }}<div class="movie-item">{{ if .PosterURL }}<img src="{{ .PosterURL }}" alt="{{ .Title }}" class="movie-poster" />{{ else }}<div class="movie-poster-placeholder">🎬</div>{{ end }}<div class="movie-content"><div class="movie-title">{{ .Title }}</div><div class="movie-year">({{ .Year }})</div></div></div>{{ end }}
-            {{ else }}<div class="empty">No movies downloaded this week</div>{{ end }}
+                <h3>Movies <span class="count-badge">{{ len .UpcomingMovies }}</span></h3>
+                {{ if .UpcomingMovies }}
+                    {{ range .UpcomingMovies }}
+                    <div class="movie-item">
+                        {{ if .PosterURL }}<img src="{{ .PosterURL }}" alt="{{ .Title }}" class="movie-poster" />{{ else }}<div class="movie-poster-placeholder">🎬</div>{{ end }}
+                        <div class="movie-content">
+                            <div class="movie-title">
+                                {{ if .IMDBID }}<a href="https://www.imdb.com/title/{{ .IMDBID }}/" target="_blank">{{ .Title }}</a>{{ else }}{{ .Title }}{{ end }}
+                            </div>
+                            <div class="movie-year">({{ .Year }})</div>
+                            {{ if .ReleaseDate }}<div class="movie-date">Releasing: {{ formatDateWithDay .ReleaseDate }}</div>{{ end }}
+                        </div>
+                    </div>
+                    {{ end }}
+                {{ else }}
+                    <div class="empty">No movies releasing this week</div>
+                {{ end }}
+            </div>
+            <div class="section">
+                <h2>✅ Downloaded This Week</h2>
+                <h3>TV Shows <span class="count-badge">{{ len .DownloadedSeriesGroups }}</span></h3>
+                {{ if .DownloadedSeriesGroups }}
+                    {{ range .DownloadedSeriesGroups }}
+                    <div class="series-group">
+                        <div class="series-header">
+                            {{ if .PosterURL }}<img src="{{ .PosterURL }}" alt="{{ .SeriesTitle }}" class="poster" />{{ else }}<div class="poster-placeholder">📺</div>{{ end }}
+                            <div class="series-title">
+                                {{ if .IMDBID }}<a href="https://www.imdb.com/title/{{ .IMDBID }}/" target="_blank">{{ .SeriesTitle }}</a>{{ else }}{{ .SeriesTitle }}{{ end }}
+                                <span style="color: #7f8c8d; font-size: 0.8em; font-weight: normal;">({{ len .Episodes }} episode{{ if gt (len .Episodes) 1 }}s{{ end }})</span>
+                            </div>
+                        </div>
+                        <div class="episode-list">
+                            {{ range .Episodes }}
+                            <div class="episode-item">
+                                <span class="episode-number">S{{ printf "%02d" .SeasonNum }}E{{ printf "%02d" .EpisodeNum }}</span>
+                                <span class="episode-title">{{ if .Title }}{{ .Title }}{{ else }}Episode {{ .EpisodeNum }}{{ end }}</span>
+                            </div>
+                            {{ end }}
+                        </div>
+                    </div>
+                    {{ end }}
+                {{ else }}
+                    <div class="empty">No shows downloaded this week</div>
+                {{ end }}
+                <h3>Movies <span class="count-badge">{{ len .DownloadedMovies }}</span></h3>
+                {{ if .DownloadedMovies }}
+                    {{ range .DownloadedMovies }}
+                    <div class="movie-item">
+                        {{ if .PosterURL }}<img src="{{ .PosterURL }}" alt="{{ .Title }}" class="movie-poster" />{{ else }}<div class="movie-poster-placeholder">🎬</div>{{ end }}
+                        <div class="movie-content">
+                            <div class="movie-title">
+                                {{ if .IMDBID }}<a href="https://www.imdb.com/title/{{ .IMDBID }}/" target="_blank">{{ .Title }}</a>{{ else }}{{ .Title }}{{ end }}
+                            </div>
+                            <div class="movie-year">({{ .Year }})</div>
+                        </div>
+                    </div>
+                    {{ end }}
+                {{ else }}
+                    <div class="empty">No movies downloaded this week</div>
+                {{ end }}
+            </div>
         </div>
         <div class="footer">Generated by Newslettar • {{ .WeekEnd }}</div>
     </div>
 </body>
 </html>`
 
-	t, err := template.New("newsletter").Parse(tmpl)
+	funcMap := template.FuncMap{
+		"formatDateWithDay": formatDateWithDay,
+	}
+
+	t, err := template.New("newsletter").Funcs(funcMap).Parse(tmpl)
 	if err != nil {
 		return "", err
 	}
@@ -636,9 +743,19 @@ func generateHTML(data NewsletterData) (string, error) {
 func sendEmail(cfg Config, subject, htmlBody string) error {
 	auth := smtp.PlainAuth("", cfg.MailgunUser, cfg.MailgunPass, cfg.MailgunSMTP)
 
+	fromHeader := cfg.FromEmail
+	if cfg.FromName != "" {
+		fromHeader = fmt.Sprintf("%s <%s>", cfg.FromName, cfg.FromEmail)
+	}
+
 	for _, toEmail := range cfg.ToEmails {
+		toEmail = strings.TrimSpace(toEmail)
+		if toEmail == "" {
+			continue
+		}
+
 		headers := make(map[string]string)
-		headers["From"] = cfg.FromEmail
+		headers["From"] = fromHeader
 		headers["To"] = toEmail
 		headers["Subject"] = subject
 		headers["MIME-Version"] = "1.0"
@@ -665,7 +782,9 @@ func sendEmail(cfg Config, subject, htmlBody string) error {
 func startWebServer() {
 	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/api/config", configHandler)
-	http.HandleFunc("/api/test", testHandler)
+	http.HandleFunc("/api/test-sonarr", testSonarrHandler)
+	http.HandleFunc("/api/test-radarr", testRadarrHandler)
+	http.HandleFunc("/api/test-email", testEmailHandler)
 	http.HandleFunc("/api/send", sendHandler)
 	http.HandleFunc("/api/schedule", scheduleHandler)
 	http.HandleFunc("/api/logs", logsHandler)
@@ -724,14 +843,15 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
         .section.active { display: block; }
         .form-group { margin-bottom: 25px; }
         .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #e0e0e0; }
-        .form-group input { width: 100%; padding: 12px 15px; border: 2px solid #4a4a4a; border-radius: 8px; font-size: 1em; transition: border-color 0.3s; background: #2d2d2d; color: #e0e0e0; }
-        .form-group input:focus { outline: none; border-color: #6a6a6a; }
+        .form-group input, .form-group select { width: 100%; padding: 12px 15px; border: 2px solid #4a4a4a; border-radius: 8px; font-size: 1em; transition: border-color 0.3s; background: #2d2d2d; color: #e0e0e0; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #6a6a6a; }
         .form-group input::placeholder { color: #808080; }
         .form-section { background: #2d2d2d; padding: 20px; border-radius: 8px; margin-bottom: 25px; border: 1px solid #4a4a4a; }
         .form-section h3 { color: #e0e0e0; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #4a4a4a; }
         .btn { padding: 12px 30px; border: none; border-radius: 8px; font-size: 1em; font-weight: 600; cursor: pointer; transition: all 0.3s; margin-right: 10px; margin-bottom: 10px; }
         .btn-primary { background: #4a4a4a; color: #ffffff; border: 1px solid #5a5a5a; }
         .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3); background: #5a5a5a; }
+        .btn-primary:disabled { background: #3a3a3a; cursor: not-allowed; transform: none; }
         .btn-success { background: #4a6a4a; color: white; border: 1px solid #5a7a5a; }
         .btn-success:hover { background: #5a7a5a; }
         .btn-danger { background: #6a4a4a; color: white; border: 1px solid #7a5a5a; }
@@ -753,6 +873,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
         .update-info { background: #2d2d2d; border: 1px solid #4a4a4a; padding: 15px; border-radius: 8px; margin-bottom: 20px; color: #e0e0e0; }
         .spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: white; animation: spin 1s ease-in-out infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        .test-connection-btn { margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -779,11 +900,15 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                         <h3>🎬 Sonarr</h3>
                         <div class="form-group"><label>Sonarr URL</label><input type="text" id="sonarr_url" placeholder="http://192.168.1.100:8989" required></div>
                         <div class="form-group"><label>Sonarr API Key</label><input type="text" id="sonarr_api_key" placeholder="Your Sonarr API Key" required></div>
+                        <button type="button" class="btn btn-secondary test-connection-btn" onclick="testSonarr()">🔍 Test Sonarr Connection</button>
+                        <div id="sonarrTestResult" class="test-results"></div>
                     </div>
                     <div class="form-section">
                         <h3>🎥 Radarr</h3>
                         <div class="form-group"><label>Radarr URL</label><input type="text" id="radarr_url" placeholder="http://192.168.1.100:7878" required></div>
                         <div class="form-group"><label>Radarr API Key</label><input type="text" id="radarr_api_key" placeholder="Your Radarr API Key" required></div>
+                        <button type="button" class="btn btn-secondary test-connection-btn" onclick="testRadarr()">🔍 Test Radarr Connection</button>
+                        <div id="radarrTestResult" class="test-results"></div>
                     </div>
                     <div class="form-section">
                         <h3>📧 Email Settings</h3>
@@ -792,14 +917,17 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                         <div class="form-group"><label>SMTP Username</label><input type="text" id="mailgun_user" placeholder="postmaster@yourdomain.mailgun.org" required></div>
                         <div class="form-group"><label>SMTP Password</label><input type="password" id="mailgun_pass" placeholder="Your SMTP Password" required></div>
                         <div class="form-group"><label>From Email</label><input type="email" id="from_email" placeholder="newsletter@yourdomain.com" required></div>
+                        <div class="form-group"><label>From Name (Sender Display Name)</label><input type="text" id="from_name" placeholder="Newslettar" value="Newslettar"></div>
                         <div class="form-group"><label>To Email(s) (comma-separated)</label><input type="text" id="to_emails" placeholder="user1@example.com, user2@example.com" required></div>
+                        <button type="button" class="btn btn-secondary test-connection-btn" onclick="testEmail()">🔍 Test Email Configuration</button>
+                        <div id="emailTestResult" class="test-results"></div>
                     </div>
 
                     <div class="form-section">
                         <h3>⏰ Schedule</h3>
                         <div class="form-group">
                             <label>Day of Week</label>
-                            <select id="schedule_day" style="width: 100%; padding: 12px 15px; border: 2px solid #4a4a4a; border-radius: 8px; font-size: 1em; background: #2d2d2d; color: #e0e0e0;">
+                            <select id="schedule_day">
                                 <option value="Mon">Monday</option>
                                 <option value="Tue">Tuesday</option>
                                 <option value="Wed">Wednesday</option>
@@ -811,7 +939,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                         </div>
                         <div class="form-group">
                             <label>Time (24-hour format)</label>
-                            <input type="time" id="schedule_time" value="09:00" required style="width: 100%; padding: 12px 15px; border: 2px solid #4a4a4a; border-radius: 8px; font-size: 1em; background: #2d2d2d; color: #e0e0e0;">
+                            <input type="time" id="schedule_time" value="09:00" required>
                         </div>
                         <div style="background: #2d3a4a; padding: 10px; border-radius: 6px; font-size: 0.9em; color: #a0b0d0; border: 1px solid #3a4a5a;">
                             ℹ️ Newsletter will be sent automatically every <strong><span id="schedule_preview">Sunday at 09:00</span></strong>
@@ -824,11 +952,8 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                 <div id="actionStatus" class="status-box"></div>
                 <h2 style="margin-bottom: 20px; color: #e0e0e0;">Quick Actions</h2>
                 <div class="action-buttons">
-                    <button class="btn btn-success" onclick="testConnections()">🔍 Test Connections</button>
                     <button class="btn btn-primary" onclick="sendNewsletter()">📧 Send Newsletter Now</button>
-                    <button class="btn btn-secondary" onclick="showScheduleInfo()">⏰ View Schedule</button>
                 </div>
-                <div id="testResults" class="test-results"></div>
             </div>
             <div id="logs" class="section">
                 <h2 style="margin-bottom: 20px; color: #e0e0e0;">Recent Logs</h2>
@@ -856,6 +981,8 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
         </div>
     </div>
     <script>
+        let logsRefreshInterval;
+        
         window.onload = () => {
             loadConfig();
             checkUpdateSilently();
@@ -880,21 +1007,33 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
             document.getElementById(section).classList.add('active');
             event.target.classList.add('active');
-            if (section === 'logs') loadLogs();
+            
+            // Clear logs interval when leaving logs section
+            if (logsRefreshInterval) {
+                clearInterval(logsRefreshInterval);
+                logsRefreshInterval = null;
+            }
+            
+            if (section === 'logs') {
+                loadLogs();
+                // Auto-refresh logs every 5 seconds
+                logsRefreshInterval = setInterval(loadLogs, 5000);
+            }
         }
         
         function loadConfig() {
             fetch('/api/config').then(r => r.json()).then(data => {
-                document.getElementById('sonarr_url').value = data.sonarr_url;
-                document.getElementById('sonarr_api_key').value = data.sonarr_api_key;
-                document.getElementById('radarr_url').value = data.radarr_url;
-                document.getElementById('radarr_api_key').value = data.radarr_api_key;
-                document.getElementById('mailgun_smtp').value = data.mailgun_smtp;
-                document.getElementById('mailgun_port').value = data.mailgun_port;
-                document.getElementById('mailgun_user').value = data.mailgun_user;
-                document.getElementById('mailgun_pass').value = data.mailgun_pass;
-                document.getElementById('from_email').value = data.from_email;
-                document.getElementById('to_emails').value = data.to_emails;
+                document.getElementById('sonarr_url').value = data.sonarr_url || '';
+                document.getElementById('sonarr_api_key').value = data.sonarr_api_key || '';
+                document.getElementById('radarr_url').value = data.radarr_url || '';
+                document.getElementById('radarr_api_key').value = data.radarr_api_key || '';
+                document.getElementById('mailgun_smtp').value = data.mailgun_smtp || '';
+                document.getElementById('mailgun_port').value = data.mailgun_port || '';
+                document.getElementById('mailgun_user').value = data.mailgun_user || '';
+                document.getElementById('mailgun_pass').value = data.mailgun_pass || '';
+                document.getElementById('from_email').value = data.from_email || '';
+                document.getElementById('from_name').value = data.from_name || 'Newslettar';
+                document.getElementById('to_emails').value = data.to_emails || '';
                 document.getElementById('schedule_day').value = data.schedule_day || 'Sun';
                 document.getElementById('schedule_time').value = data.schedule_time || '09:00';
                 updateSchedulePreview();
@@ -908,8 +1047,10 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
         }
         
         document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('schedule_day').addEventListener('change', updateSchedulePreview);
-            document.getElementById('schedule_time').addEventListener('change', updateSchedulePreview);
+            const daySelect = document.getElementById('schedule_day');
+            const timeInput = document.getElementById('schedule_time');
+            if (daySelect) daySelect.addEventListener('change', updateSchedulePreview);
+            if (timeInput) timeInput.addEventListener('change', updateSchedulePreview);
         });
         
         function saveConfig(e) {
@@ -924,29 +1065,103 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                 mailgun_user: document.getElementById('mailgun_user').value,
                 mailgun_pass: document.getElementById('mailgun_pass').value,
                 from_email: document.getElementById('from_email').value,
+                from_name: document.getElementById('from_name').value,
                 to_emails: document.getElementById('to_emails').value,
                 schedule_day: document.getElementById('schedule_day').value,
                 schedule_time: document.getElementById('schedule_time').value,
             };
             fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) })
                 .then(r => r.json())
-                .then(() => showStatus('configStatus', '✓ Configuration saved successfully! Schedule updated.', 'success'))
+                .then(() => {
+                    showStatus('configStatus', '✓ Configuration saved successfully! Schedule updated.', 'success');
+                    updateSystemdTimer();
+                })
                 .catch(() => showStatus('configStatus', '✗ Error saving configuration', 'error'));
         }
         
-        function testConnections() {
-            showStatus('actionStatus', '🔍 Testing connections...', 'info');
-            document.getElementById('testResults').innerHTML = '';
-            fetch('/api/test').then(r => r.json()).then(data => {
-                let html = '';
-                data.results.forEach(result => {
-                    const status = result.success ? 'success' : 'error';
-                    const icon = result.success ? '✓' : '✗';
-                    html += '<div class="test-item ' + status + '">' + icon + ' ' + result.name + ': ' + result.message + '</div>';
-                });
-                document.getElementById('testResults').innerHTML = html;
-                showStatus('actionStatus', data.overall_success ? '✓ All tests passed!' : '⚠ Some tests failed', data.overall_success ? 'success' : 'error');
-            }).catch(() => showStatus('actionStatus', '✗ Error testing connections', 'error'));
+        function updateSystemdTimer() {
+            fetch('/api/schedule', { method: 'POST' })
+                .then(r => r.json())
+                .catch(err => console.error('Failed to update timer:', err));
+        }
+        
+        function testSonarr() {
+            const resultDiv = document.getElementById('sonarrTestResult');
+            resultDiv.innerHTML = '<div class="test-item"><span class="spinner"></span> Testing Sonarr connection...</div>';
+            
+            fetch('/api/test-sonarr', { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    url: document.getElementById('sonarr_url').value,
+                    api_key: document.getElementById('sonarr_api_key').value
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                const status = data.success ? 'success' : 'error';
+                const icon = data.success ? '✓' : '✗';
+                resultDiv.innerHTML = '<div class="test-item ' + status + '">' + icon + ' ' + data.message + '</div>';
+            })
+            .catch(() => {
+                resultDiv.innerHTML = '<div class="test-item error">✗ Connection test failed</div>';
+            });
+        }
+        
+        function testRadarr() {
+            const resultDiv = document.getElementById('radarrTestResult');
+            resultDiv.innerHTML = '<div class="test-item"><span class="spinner"></span> Testing Radarr connection...</div>';
+            
+            fetch('/api/test-radarr', { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    url: document.getElementById('radarr_url').value,
+                    api_key: document.getElementById('radarr_api_key').value
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                const status = data.success ? 'success' : 'error';
+                const icon = data.success ? '✓' : '✗';
+                resultDiv.innerHTML = '<div class="test-item ' + status + '">' + icon + ' ' + data.message + '</div>';
+            })
+            .catch(() => {
+                resultDiv.innerHTML = '<div class="test-item error">✗ Connection test failed</div>';
+            });
+        }
+        
+        function testEmail() {
+            const resultDiv = document.getElementById('emailTestResult');
+            const user = document.getElementById('mailgun_user').value;
+            const pass = document.getElementById('mailgun_pass').value;
+            
+            if (!user || !pass) {
+                resultDiv.innerHTML = '<div class="test-item error">✗ Please enter SMTP credentials first</div>';
+                return;
+            }
+            
+            resultDiv.innerHTML = '<div class="test-item"><span class="spinner"></span> Testing email configuration...</div>';
+            
+            fetch('/api/test-email', { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    smtp: document.getElementById('mailgun_smtp').value,
+                    port: document.getElementById('mailgun_port').value,
+                    user: user,
+                    pass: pass
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                const status = data.success ? 'success' : 'error';
+                const icon = data.success ? '✓' : '✗';
+                resultDiv.innerHTML = '<div class="test-item ' + status + '">' + icon + ' ' + data.message + '</div>';
+            })
+            .catch(() => {
+                resultDiv.innerHTML = '<div class="test-item error">✗ Connection test failed</div>';
+            });
         }
         
         function sendNewsletter() {
@@ -957,18 +1172,14 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                 .catch(() => showStatus('actionStatus', '✗ Error sending newsletter', 'error'));
         }
         
-        function showScheduleInfo() {
-            fetch('/api/schedule').then(r => r.json())
-                .then(data => {
-                    const msg = 'Next newsletter: ' + data.next_run + '<br>Change schedule in Configuration tab';
-                    showStatus('actionStatus', msg, 'info');
-                })
-                .catch(() => showStatus('actionStatus', '✗ Error checking schedule', 'error'));
-        }
-        
         function loadLogs() {
             fetch('/api/logs').then(r => r.text())
-                .then(data => document.getElementById('logsContent').textContent = data || 'No logs available')
+                .then(data => {
+                    const logsDiv = document.getElementById('logsContent');
+                    logsDiv.textContent = data || 'No logs available';
+                    // Auto-scroll to bottom
+                    logsDiv.scrollTop = logsDiv.scrollHeight;
+                })
                 .catch(() => document.getElementById('logsContent').textContent = 'Error loading logs');
         }
         
@@ -1008,35 +1219,51 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
         }
         
         function performUpdate() {
-            if (!confirm('This will download and install the latest version. The page will be unavailable for ~10 seconds during restart. Continue?')) return;
-            showStatus('updateStatus', '🚀 Update started! Building new version in background...', 'info');
+            if (!confirm('This will download and install the latest version. The web interface will be unavailable for about 20 seconds during the update and restart. Continue?')) return;
             
-            fetch('/api/update', { method: 'POST' }).then(r => r.json())
+            const updateBtn = document.getElementById('updateBtn');
+            updateBtn.disabled = true;
+            updateBtn.textContent = '⏳ Updating...';
+            
+            showStatus('updateStatus', '🚀 Downloading and building update...', 'info');
+            
+            fetch('/api/update', { method: 'POST' })
+                .then(r => r.json())
                 .then(data => {
-                    showStatus('updateStatus', '⏳ Building and restarting... Page will reload automatically.', 'info');
-                    document.getElementById('updateBadge').classList.remove('show');
-                    
-                    // Wait 15 seconds for build + restart, then reload
-                    let countdown = 15;
-                    const countdownInterval = setInterval(() => {
-                        countdown--;
-                        showStatus('updateStatus', '⏳ Restarting service... (' + countdown + 's)', 'info');
-                        if (countdown <= 0) {
-                            clearInterval(countdownInterval);
-                            location.reload();
-                        }
-                    }, 1000);
+                    if (data.success) {
+                        showStatus('updateStatus', '⏳ Building and restarting... Page will reload automatically.', 'info');
+                        document.getElementById('updateBadge').classList.remove('show');
+                        
+                        // Wait 20 seconds for download + build + restart, then reload
+                        let countdown = 20;
+                        const countdownInterval = setInterval(() => {
+                            countdown--;
+                            showStatus('updateStatus', '⏳ Restarting service... (' + countdown + 's)', 'info');
+                            if (countdown <= 0) {
+                                clearInterval(countdownInterval);
+                                location.reload();
+                            }
+                        }, 1000);
+                    } else {
+                        showStatus('updateStatus', '✗ ' + data.message, 'error');
+                        updateBtn.disabled = false;
+                        updateBtn.textContent = '🚀 Update Now';
+                    }
                 })
                 .catch(() => {
                     showStatus('updateStatus', '✗ Update request failed', 'error');
+                    updateBtn.disabled = false;
+                    updateBtn.textContent = '🚀 Update Now';
                 });
         }
         
         function showStatus(elementId, message, type) {
             const el = document.getElementById(elementId);
-            el.textContent = message;
+            el.innerHTML = message;
             el.className = 'status-box ' + type;
-            if (type !== 'error') setTimeout(() => el.className = 'status-box', 5000);
+            if (type !== 'error' && type !== 'info') {
+                setTimeout(() => el.className = 'status-box', 10000);
+            }
         }
     </script>
 </body>
@@ -1048,6 +1275,30 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 
 func configHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
+		// Read current schedule from timer
+		scheduleDay := "Sun"
+		scheduleTime := "09:00"
+		
+		cmd := exec.Command("systemctl", "cat", "newslettar-send.timer")
+		output, err := cmd.Output()
+		if err == nil {
+			lines := strings.Split(string(output), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "OnCalendar=") {
+					// Parse "OnCalendar=Sun *-*-* 09:00:00"
+					parts := strings.Fields(strings.TrimPrefix(line, "OnCalendar="))
+					if len(parts) >= 3 {
+						scheduleDay = parts[0]
+						timeStr := parts[2]
+						if len(timeStr) >= 5 {
+							scheduleTime = timeStr[:5]
+						}
+					}
+				}
+			}
+		}
+
 		cfg := WebConfig{
 			SonarrURL:    getEnv("SONARR_URL", ""),
 			SonarrAPIKey: getEnv("SONARR_API_KEY", ""),
@@ -1058,7 +1309,10 @@ func configHandler(w http.ResponseWriter, r *http.Request) {
 			MailgunUser:  getEnv("MAILGUN_USER", ""),
 			MailgunPass:  getEnv("MAILGUN_PASS", ""),
 			FromEmail:    getEnv("FROM_EMAIL", ""),
+			FromName:     getEnv("FROM_NAME", "Newslettar"),
 			ToEmails:     getEnv("TO_EMAILS", ""),
+			ScheduleDay:  scheduleDay,
+			ScheduleTime: scheduleTime,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(cfg)
@@ -1078,66 +1332,167 @@ MAILGUN_PORT=%s
 MAILGUN_USER=%s
 MAILGUN_PASS=%s
 FROM_EMAIL=%s
+FROM_NAME=%s
 TO_EMAILS=%s
+WEBUI_PORT=%s
 `, cfg.SonarrURL, cfg.SonarrAPIKey, cfg.RadarrURL, cfg.RadarrAPIKey,
 			cfg.MailgunSMTP, cfg.MailgunPort, cfg.MailgunUser, cfg.MailgunPass,
-			cfg.FromEmail, cfg.ToEmails)
+			cfg.FromEmail, cfg.FromName, cfg.ToEmails, getEnv("WEBUI_PORT", "8080"))
 
 		if err := os.WriteFile("/opt/newslettar/.env", []byte(envContent), 0644); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
+		// Update timer with new schedule
+		updateTimerSchedule(cfg.ScheduleDay, cfg.ScheduleTime)
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	}
 }
 
-func testHandler(w http.ResponseWriter, r *http.Request) {
-	cfg := loadConfig()
-	results := []map[string]interface{}{}
-	overallSuccess := true
+func updateTimerSchedule(day, timeStr string) error {
+	timerContent := fmt.Sprintf(`[Unit]
+Description=Newslettar Weekly Newsletter Timer
+Requires=newslettar-send.service
+
+[Timer]
+OnCalendar=%s *-*-* %s:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+`, day, timeStr)
+
+	if err := os.WriteFile("/etc/systemd/system/newslettar-send.timer", []byte(timerContent), 0644); err != nil {
+		return err
+	}
+
+	// Reload systemd
+	exec.Command("systemctl", "daemon-reload").Run()
+	exec.Command("systemctl", "restart", "newslettar-send.timer").Run()
+
+	return nil
+}
+
+func testSonarrHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL    string `json:"url"`
+		APIKey string `json:"api_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-
-	// Test Sonarr
-	sonarrReq, _ := http.NewRequest("GET", cfg.SonarrURL+"/api/v3/system/status", nil)
-	sonarrReq.Header.Set("X-Api-Key", cfg.SonarrAPIKey)
-	sonarrResp, err := client.Do(sonarrReq)
-	if err != nil || sonarrResp.StatusCode != 200 {
-		results = append(results, map[string]interface{}{"name": "Sonarr", "success": false, "message": "Connection failed"})
-		overallSuccess = false
+	httpReq, _ := http.NewRequest("GET", req.URL+"/api/v3/system/status", nil)
+	httpReq.Header.Set("X-Api-Key", req.APIKey)
+	
+	resp, err := client.Do(httpReq)
+	success := false
+	message := "Connection failed"
+	
+	if err == nil && resp.StatusCode == 200 {
+		success = true
+		message = "Connected successfully to Sonarr"
+		resp.Body.Close()
+	} else if err != nil {
+		message = fmt.Sprintf("Connection failed: %v", err)
 	} else {
-		results = append(results, map[string]interface{}{"name": "Sonarr", "success": true, "message": "Connected successfully"})
-		sonarrResp.Body.Close()
-	}
-
-	// Test Radarr
-	radarrReq, _ := http.NewRequest("GET", cfg.RadarrURL+"/api/v3/system/status", nil)
-	radarrReq.Header.Set("X-Api-Key", cfg.RadarrAPIKey)
-	radarrResp, err := client.Do(radarrReq)
-	if err != nil || radarrResp.StatusCode != 200 {
-		results = append(results, map[string]interface{}{"name": "Radarr", "success": false, "message": "Connection failed"})
-		overallSuccess = false
-	} else {
-		results = append(results, map[string]interface{}{"name": "Radarr", "success": true, "message": "Connected successfully"})
-		radarrResp.Body.Close()
-	}
-
-	// Email test
-	if cfg.MailgunUser == "" || cfg.MailgunPass == "" {
-		results = append(results, map[string]interface{}{"name": "Email", "success": false, "message": "SMTP credentials missing"})
-		overallSuccess = false
-	} else {
-		results = append(results, map[string]interface{}{"name": "Email", "success": true, "message": "SMTP credentials configured"})
+		message = fmt.Sprintf("Connection failed: HTTP %d", resp.StatusCode)
+		resp.Body.Close()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"overall_success": overallSuccess, "results": results})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": success,
+		"message": message,
+	})
+}
+
+func testRadarrHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL    string `json:"url"`
+		APIKey string `json:"api_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	httpReq, _ := http.NewRequest("GET", req.URL+"/api/v3/system/status", nil)
+	httpReq.Header.Set("X-Api-Key", req.APIKey)
+	
+	resp, err := client.Do(httpReq)
+	success := false
+	message := "Connection failed"
+	
+	if err == nil && resp.StatusCode == 200 {
+		success = true
+		message = "Connected successfully to Radarr"
+		resp.Body.Close()
+	} else if err != nil {
+		message = fmt.Sprintf("Connection failed: %v", err)
+	} else {
+		message = fmt.Sprintf("Connection failed: HTTP %d", resp.StatusCode)
+		resp.Body.Close()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": success,
+		"message": message,
+	})
+}
+
+func testEmailHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SMTP string `json:"smtp"`
+		Port string `json:"port"`
+		User string `json:"user"`
+		Pass string `json:"pass"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	success := false
+	message := "SMTP credentials missing"
+
+	if req.User != "" && req.Pass != "" {
+		// Test SMTP authentication
+		auth := smtp.PlainAuth("", req.User, req.Pass, req.SMTP)
+		addr := fmt.Sprintf("%s:%s", req.SMTP, req.Port)
+		
+		// Try to connect and auth
+		client, err := smtp.Dial(addr)
+		if err != nil {
+			message = fmt.Sprintf("Connection failed: %v", err)
+		} else {
+			defer client.Close()
+			if err = client.Auth(auth); err != nil {
+				message = fmt.Sprintf("Authentication failed: %v", err)
+			} else {
+				success = true
+				message = "SMTP authentication successful"
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": success,
+		"message": message,
+	})
 }
 
 func sendHandler(w http.ResponseWriter, r *http.Request) {
 	cmd := exec.Command("/opt/newslettar/newslettar")
+	cmd.Env = append(os.Environ())
 	output, err := cmd.CombinedOutput()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1148,7 +1503,16 @@ func sendHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func scheduleHandler(w http.ResponseWriter, r *http.Request) {
-	cmd := exec.Command("systemctl", "list-timers", "newslettar.timer", "--no-pager")
+	if r.Method == "POST" {
+		// Trigger timer update
+		exec.Command("systemctl", "daemon-reload").Run()
+		exec.Command("systemctl", "restart", "newslettar-send.timer").Run()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		return
+	}
+
+	cmd := exec.Command("systemctl", "list-timers", "newslettar-send.timer", "--no-pager")
 	output, _ := cmd.CombinedOutput()
 
 	lines := strings.Split(string(output), "\n")
@@ -1173,7 +1537,7 @@ func logsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	lines := strings.Split(string(data), "\n")
-	start := len(lines) - 100
+	start := len(lines) - 200
 	if start < 0 {
 		start = 0
 	}
@@ -1232,10 +1596,9 @@ func updateHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Update started! Building in background...",
-		"output":  "The service will restart automatically when ready.",
 	})
 
-	// Run update in background
+	// Run update in background (similar to manual update process)
 	go func() {
 		time.Sleep(1 * time.Second) // Give response time to send
 
@@ -1243,10 +1606,10 @@ func updateHandler(w http.ResponseWriter, r *http.Request) {
 			cd /opt/newslettar
 			cp .env .env.backup
 			wget -q -O main.go https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar/main.go || exit 1
+			wget -q -O go.mod https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar/go.mod || exit 1
 			/usr/local/go/bin/go build -o newslettar_new main.go || exit 1
 			mv .env.backup .env
 			chmod +x newslettar_new
-			# Stop service, replace binary, start service
 			systemctl stop newslettar.service
 			mv newslettar newslettar.old
 			mv newslettar_new newslettar
@@ -1256,9 +1619,9 @@ func updateHandler(w http.ResponseWriter, r *http.Request) {
 		
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			log.Printf("Update failed: %v, output: %s", err, string(output))
+			log.Printf("❌ Update failed: %v, output: %s", err, string(output))
 		} else {
-			log.Printf("Update completed successfully")
+			log.Printf("✅ Update completed successfully")
 		}
 	}()
 }

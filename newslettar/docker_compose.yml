@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  newslettar:
+    build: .
+    container_name: newslettar
+    restart: unless-stopped
+    environment:
+      # Sonarr Configuration
+      - SONARR_URL=http://sonarr:8989
+      - SONARR_API_KEY=your_sonarr_api_key_here
+      
+      # Radarr Configuration
+      - RADARR_URL=http://radarr:7878
+      - RADARR_API_KEY=your_radarr_api_key_here
+      
+      # Mailgun Configuration
+      - MAILGUN_SMTP=smtp.mailgun.org
+      - MAILGUN_PORT=587
+      - MAILGUN_USER=postmaster@your-domain.mailgun.org
+      - MAILGUN_PASS=your_mailgun_password
+      
+      # Email Configuration
+      - FROM_EMAIL=newsletter@yourdomain.com
+      - TO_EMAILS=your-email@example.com
+      
+      # Timezone
+      - TZ=America/New_York
+    volumes:
+      - ./logs:/var/log
+    networks:
+      - media
+
+networks:
+  media:
+    external: true

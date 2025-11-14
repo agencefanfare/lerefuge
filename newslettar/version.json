@@ -1,18 +1,13 @@
 {
-  "version": "1.0.8",
+  "version": "1.0.9",
   "released": "2025-11-14",
   "changelog": [
-    "Fixed schedule not updating - now properly saves and applies timer changes",
-    "Removed redundant 'Next newsletter' info from Actions tab",
-    "Fixed logs not auto-refreshing - now updates every 5 seconds when viewing",
-    "Fixed Update button - now properly downloads, builds, and restarts service",
-    "Added individual test connection buttons for Sonarr, Radarr, and Email in Configuration tab",
-    "Added email sender name field to customize 'From' display name",
-    "Added IMDB links for all movies, series, and episodes",
-    "Releases now sorted chronologically with day of week displayed",
-    "Notifications now persist longer (10 seconds instead of 5)",
-    "Logs now show last 200 lines instead of 100",
-    "Improved error handling and user feedback throughout",
-    "Updated UI colors to darker greyish theme for better contrast"
+    "Added save buttons to each configuration section (Sonarr, Radarr, Email, Schedule)",
+    "Replaced emoji icons with real Sonarr and Radarr logos",
+    "Fixed duplicate newsletter sends with lock file mechanism (1-hour protection)",
+    "Fixed timer configuration: AccuracySec=1s and Persistent=false to prevent multiple triggers",
+    "Fixed SMTP test to use STARTTLS encryption properly",
+    "Restored original beautiful email template design",
+    "All previous v1.0.8 improvements still included"
   ]
 }

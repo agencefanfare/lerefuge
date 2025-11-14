@@ -88,7 +88,7 @@ type WebConfig struct {
 	ScheduleTime   string `json:"schedule_time"`
 }
 
-const version = "1.0.8"
+const version = "1.0.9"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")
@@ -103,6 +103,30 @@ func main() {
 
 // Newsletter sending logic
 func runNewsletter() {
+	// Create lock file to prevent duplicate sends
+	lockFile := "/tmp/newslettar.lock"
+	
+	// Check if lock file exists and is recent (less than 1 hour old)
+	if info, err := os.Stat(lockFile); err == nil {
+		if time.Since(info.ModTime()) < 1*time.Hour {
+			log.Println("⏸️  Newsletter already sent recently (lock file exists). Skipping to prevent duplicates.")
+			return
+		}
+		// Lock file is old, remove it
+		os.Remove(lockFile)
+	}
+	
+	// Create lock file
+	if err := os.WriteFile(lockFile, []byte(time.Now().Format(time.RFC3339)), 0644); err != nil {
+		log.Printf("⚠️  Warning: Could not create lock file: %v", err)
+	}
+	defer func() {
+		// Keep lock file for 1 hour to prevent duplicates
+		time.AfterFunc(1*time.Hour, func() {
+			os.Remove(lockFile)
+		})
+	}()
+
 	cfg := loadConfig()
 
 	log.Println("🚀 Starting Newslettar - Weekly newsletter generation...")
@@ -845,17 +869,19 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                 <div id="configStatus" class="status-box"></div>
                 <form id="configForm" onsubmit="saveConfig(event)">
                     <div class="form-section">
-                        <h3>🎬 Sonarr</h3>
+                        <h3><img src="https://raw.githubusercontent.com/Sonarr/Sonarr/develop/Logo/256.png" style="width: 24px; height: 24px; vertical-align: middle; margin-right: 8px;">Sonarr</h3>
                         <div class="form-group"><label>Sonarr URL</label><input type="text" id="sonarr_url" placeholder="http://192.168.1.100:8989" required></div>
                         <div class="form-group"><label>Sonarr API Key</label><input type="text" id="sonarr_api_key" placeholder="Your Sonarr API Key" required></div>
-                        <button type="button" class="btn btn-secondary test-connection-btn" onclick="testSonarr()">🔍 Test Sonarr Connection</button>
+                        <button type="button" class="btn btn-secondary test-connection-btn" onclick="testSonarr()">🔍 Test Connection</button>
+                        <button type="button" class="btn btn-primary test-connection-btn" onclick="saveConfig(event)">💾 Save Sonarr Settings</button>
                         <div id="sonarrTestResult" class="test-results"></div>
                     </div>
                     <div class="form-section">
-                        <h3>🎥 Radarr</h3>
+                        <h3><img src="https://raw.githubusercontent.com/Radarr/Radarr/develop/Logo/256.png" style="width: 24px; height: 24px; vertical-align: middle; margin-right: 8px;">Radarr</h3>
                         <div class="form-group"><label>Radarr URL</label><input type="text" id="radarr_url" placeholder="http://192.168.1.100:7878" required></div>
                         <div class="form-group"><label>Radarr API Key</label><input type="text" id="radarr_api_key" placeholder="Your Radarr API Key" required></div>
-                        <button type="button" class="btn btn-secondary test-connection-btn" onclick="testRadarr()">🔍 Test Radarr Connection</button>
+                        <button type="button" class="btn btn-secondary test-connection-btn" onclick="testRadarr()">🔍 Test Connection</button>
+                        <button type="button" class="btn btn-primary test-connection-btn" onclick="saveConfig(event)">💾 Save Radarr Settings</button>
                         <div id="radarrTestResult" class="test-results"></div>
                     </div>
                     <div class="form-section">
@@ -867,7 +893,8 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                         <div class="form-group"><label>From Email</label><input type="email" id="from_email" placeholder="newsletter@yourdomain.com" required></div>
                         <div class="form-group"><label>From Name (Sender Display Name)</label><input type="text" id="from_name" placeholder="Newslettar" value="Newslettar"></div>
                         <div class="form-group"><label>To Email(s) (comma-separated)</label><input type="text" id="to_emails" placeholder="user1@example.com, user2@example.com" required></div>
-                        <button type="button" class="btn btn-secondary test-connection-btn" onclick="testEmail()">🔍 Test Email Configuration</button>
+                        <button type="button" class="btn btn-secondary test-connection-btn" onclick="testEmail()">🔍 Test Connection</button>
+                        <button type="button" class="btn btn-primary test-connection-btn" onclick="saveConfig(event)">💾 Save Email Settings</button>
                         <div id="emailTestResult" class="test-results"></div>
                     </div>
 
@@ -889,11 +916,12 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                             <label>Time (24-hour format)</label>
                             <input type="time" id="schedule_time" value="09:00" required>
                         </div>
-                        <div style="background: #2d3a4a; padding: 10px; border-radius: 6px; font-size: 0.9em; color: #a0b0d0; border: 1px solid #3a4a5a;">
+                        <div style="background: #2d3a4a; padding: 10px; border-radius: 6px; font-size: 0.9em; color: #a0b0d0; border: 1px solid #3a4a5a; margin-bottom: 15px;">
                             ℹ️ Newsletter will be sent automatically every <strong><span id="schedule_preview">Sunday at 09:00</span></strong>
                         </div>
+                        <button type="button" class="btn btn-primary" onclick="saveConfig(event)">💾 Save Schedule</button>
                     </div>
-                    <button type="submit" class="btn btn-primary">💾 Save Configuration</button>
+                    <button type="submit" class="btn btn-primary" style="margin-top: 20px;">💾 Save All Configuration</button>
                 </form>
             </div>
             <div id="actions" class="section">
@@ -1307,7 +1335,8 @@ Requires=newslettar-send.service
 
 [Timer]
 OnCalendar=%s *-*-* %s:00
-Persistent=true
+AccuracySec=1s
+Persistent=false
 
 [Install]
 WantedBy=timers.target

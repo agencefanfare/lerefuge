@@ -162,7 +162,8 @@ Requires=newslettar-send.service
 
 [Timer]
 OnCalendar=Sun *-*-* 09:00:00
-Persistent=true
+AccuracySec=1s
+Persistent=false
 
 [Install]
 WantedBy=timers.target

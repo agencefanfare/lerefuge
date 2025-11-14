@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -1464,21 +1465,43 @@ func testEmailHandler(w http.ResponseWriter, r *http.Request) {
 	message := "SMTP credentials missing"
 
 	if req.User != "" && req.Pass != "" {
-		// Test SMTP authentication
-		auth := smtp.PlainAuth("", req.User, req.Pass, req.SMTP)
+		// Test SMTP authentication with STARTTLS
 		addr := fmt.Sprintf("%s:%s", req.SMTP, req.Port)
 		
-		// Try to connect and auth
+		// Try to connect
 		client, err := smtp.Dial(addr)
 		if err != nil {
 			message = fmt.Sprintf("Connection failed: %v", err)
 		} else {
 			defer client.Close()
-			if err = client.Auth(auth); err != nil {
-				message = fmt.Sprintf("Authentication failed: %v", err)
+			
+			// Send EHLO
+			if err = client.Hello("localhost"); err != nil {
+				message = fmt.Sprintf("EHLO failed: %v", err)
+			} else if ok, _ := client.Extension("STARTTLS"); ok {
+				// Use STARTTLS if available
+				config := &tls.Config{ServerName: req.SMTP}
+				if err = client.StartTLS(config); err != nil {
+					message = fmt.Sprintf("STARTTLS failed: %v", err)
+				} else {
+					// Now try to authenticate
+					auth := smtp.PlainAuth("", req.User, req.Pass, req.SMTP)
+					if err = client.Auth(auth); err != nil {
+						message = fmt.Sprintf("Authentication failed: %v", err)
+					} else {
+						success = true
+						message = "SMTP authentication successful (with STARTTLS)"
+					}
+				}
 			} else {
-				success = true
-				message = "SMTP authentication successful"
+				// Try authentication without STARTTLS
+				auth := smtp.PlainAuth("", req.User, req.Pass, req.SMTP)
+				if err = client.Auth(auth); err != nil {
+					message = fmt.Sprintf("Authentication failed: %v", err)
+				} else {
+					success = true
+					message = "SMTP authentication successful"
+				}
 			}
 		}
 	}

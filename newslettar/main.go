@@ -509,7 +509,7 @@ func fetchRadarrCalendar(cfg Config, start, end time.Time) ([]Movie, error) {
 		for _, img := range m.Images {
 			if img.CoverType == "poster" {
 				if img.RemoteURL != "" {
-					posterURL = img.RemoteUrl
+					posterURL = img.RemoteURL
 				} else if img.URL != "" {
 					posterURL = cfg.RadarrURL + img.URL
 				}

@@ -77,7 +77,7 @@ type WebConfig struct {
 	ToEmails     string `json:"to_emails"`
 }
 
-const version = "1.0.0"
+const version = "1.0.2"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")
@@ -694,6 +694,29 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
         .nav-item { flex: 1; padding: 15px; text-align: center; cursor: pointer; border: none; background: none; font-size: 1em; font-weight: 500; color: #6c757d; transition: all 0.3s; }
         .nav-item:hover { background: #e9ecef; color: #495057; }
         .nav-item.active { background: white; color: #667eea; border-bottom: 3px solid #667eea; }
+        .update-badge {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background: #dc3545;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            animation: pulse 2s infinite;
+        }
+        .update-badge.show {
+            display: flex;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
         .content { padding: 30px; }
         .section { display: none; }
         .section.active { display: block; }
@@ -740,7 +763,10 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
             <button class="nav-item active" onclick="showSection('config')">⚙️ Configuration</button>
             <button class="nav-item" onclick="showSection('actions')">🚀 Actions</button>
             <button class="nav-item" onclick="showSection('logs')">📋 Logs</button>
-            <button class="nav-item" onclick="showSection('update')">🔄 Update</button>
+            <button class="nav-item" onclick="showSection('update')" style="position: relative;">
+                🔄 Update
+                <span class="update-badge" id="updateBadge">!</span>
+            </button>
         </div>
         <div class="content">
             <div id="config" class="section active">
@@ -787,19 +813,41 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                 <div id="updateStatus" class="status-box"></div>
                 <h2 style="margin-bottom: 20px;">Update Newslettar</h2>
                 <div class="update-info">
-                    <strong>Current Version:</strong> ` + version + `<br>
+                    <strong>Current Version:</strong> <span id="currentVersion">` + version + `</span><br>
+                    <strong>Latest Version:</strong> <span id="latestVersion">Checking...</span><br>
                     <strong>Repository:</strong> github.com/agencefanfare/lerefuge
                 </div>
-                <div class="action-buttons">
+                <div id="changelogSection" style="display: none; margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                    <h3 style="margin-bottom: 10px;">What's New:</h3>
+                    <ul id="changelogList" style="margin-left: 20px;"></ul>
+                </div>
+                <div class="action-buttons" style="margin-top: 20px;">
                     <button class="btn btn-warning" onclick="checkUpdate()">🔍 Check for Updates</button>
-                    <button class="btn btn-primary" onclick="performUpdate()">🚀 Update Now</button>
+                    <button class="btn btn-primary" id="updateBtn" onclick="performUpdate()" style="display: none;">🚀 Update Now</button>
                 </div>
                 <div id="updateResults" style="margin-top: 20px;"></div>
             </div>
         </div>
     </div>
     <script>
-        window.onload = () => loadConfig();
+        window.onload = () => {
+            loadConfig();
+            checkUpdateSilently();
+        };
+        
+        function checkUpdateSilently() {
+            fetch('/api/version').then(r => r.json())
+                .then(data => {
+                    document.getElementById('latestVersion').textContent = data.latest_version;
+                    if (data.update_available) {
+                        document.getElementById('updateBadge').classList.add('show');
+                        document.getElementById('updateBtn').style.display = 'inline-block';
+                    }
+                })
+                .catch(() => {
+                    document.getElementById('latestVersion').textContent = 'Unknown';
+                });
+        }
         
         function showSection(section) {
             document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -884,10 +932,33 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
             showStatus('updateStatus', '🔍 Checking for updates...', 'info');
             fetch('/api/version').then(r => r.json())
                 .then(data => {
-                    const msg = data.update_available ? 
-                        '✓ Update available: ' + data.latest_version : 
-                        '✓ You are running the latest version';
-                    showStatus('updateStatus', msg, data.update_available ? 'info' : 'success');
+                    document.getElementById('currentVersion').textContent = data.current_version;
+                    document.getElementById('latestVersion').textContent = data.latest_version;
+                    
+                    if (data.update_available) {
+                        const msg = '✓ Update available: ' + data.current_version + ' → ' + data.latest_version;
+                        showStatus('updateStatus', msg, 'info');
+                        document.getElementById('updateBtn').style.display = 'inline-block';
+                        document.getElementById('updateBadge').classList.add('show');
+                        
+                        // Show changelog
+                        if (data.changelog && data.changelog.length > 0) {
+                            const changelogList = document.getElementById('changelogList');
+                            changelogList.innerHTML = '';
+                            data.changelog.forEach(change => {
+                                const li = document.createElement('li');
+                                li.textContent = change;
+                                li.style.marginBottom = '5px';
+                                changelogList.appendChild(li);
+                            });
+                            document.getElementById('changelogSection').style.display = 'block';
+                        }
+                    } else {
+                        showStatus('updateStatus', '✓ You are running the latest version (' + data.current_version + ')', 'success');
+                        document.getElementById('updateBtn').style.display = 'none';
+                        document.getElementById('updateBadge').classList.remove('show');
+                        document.getElementById('changelogSection').style.display = 'none';
+                    }
                 })
                 .catch(() => showStatus('updateStatus', '✗ Error checking for updates', 'error'));
         }
@@ -901,6 +972,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                 .then(data => {
                     showStatus('updateStatus', data.success ? '✓ Update complete! Reloading...' : '✗ Update failed: ' + data.message, data.success ? 'success' : 'error');
                     if (data.success) {
+                        document.getElementById('updateBadge').classList.remove('show');
                         setTimeout(() => location.reload(), 2000);
                     }
                     if (data.output) {
@@ -1061,11 +1133,46 @@ func logsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func versionHandler(w http.ResponseWriter, r *http.Request) {
+	// Fetch latest version from GitHub
+	resp, err := http.Get("https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar/version.json")
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"current_version":  version,
+			"latest_version":   version,
+			"update_available": false,
+			"error":            "Could not check for updates",
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	var remoteVersion struct {
+		Version   string   `json:"version"`
+		Released  string   `json:"released"`
+		Changelog []string `json:"changelog"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&remoteVersion); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"current_version":  version,
+			"latest_version":   version,
+			"update_available": false,
+			"error":            "Could not parse version info",
+		})
+		return
+	}
+
+	updateAvailable := remoteVersion.Version != version
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"current_version":  version,
-		"latest_version":   "1.0.0", // TODO: Check GitHub for latest
-		"update_available": false,
+		"latest_version":   remoteVersion.Version,
+		"update_available": updateAvailable,
+		"released":         remoteVersion.Released,
+		"changelog":        remoteVersion.Changelog,
 	})
 }
 

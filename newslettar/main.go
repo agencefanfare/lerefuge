@@ -90,7 +90,7 @@ type WebConfig struct {
 	ShowDownloaded string `json:"show_downloaded"`
 }
 
-const version = "1.0.15"
+const version = "1.0.16"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")
@@ -1713,9 +1713,20 @@ func testEmailHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func sendHandler(w http.ResponseWriter, r *http.Request) {
+	// Load .env file and add to environment
+	envMap := readEnvFile()
+	envVars := os.Environ()
+	
+	// Add all .env variables to the environment
+	for key, value := range envMap {
+		envVars = append(envVars, fmt.Sprintf("%s=%s", key, value))
+	}
+	
+	// Add MANUAL_RUN flag
+	envVars = append(envVars, "MANUAL_RUN=true")
+	
 	cmd := exec.Command("/opt/newslettar/newslettar")
-	// Mark this as a manual run so it bypasses schedule check
-	cmd.Env = append(os.Environ(), "MANUAL_RUN=true")
+	cmd.Env = envVars
 	output, err := cmd.CombinedOutput()
 
 	w.Header().Set("Content-Type", "application/json")

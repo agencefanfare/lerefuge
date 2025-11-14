@@ -1444,7 +1444,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
             
             showStatus('templateStatus', '🔄 Loading preview...', 'info');
             
-            fetch(`/api/preview?show_posters=${showPosters}&show_downloaded=${showDownloaded}`)
+            fetch('/api/preview?show_posters=' + showPosters + '&show_downloaded=' + showDownloaded)
                 .then(r => r.text())
                 .then(html => {
                     iframe.srcdoc = html;

@@ -79,7 +79,7 @@ type WebConfig struct {
 	ScheduleTime   string `json:"schedule_time"`
 }
 
-const version = "1.0.2"
+const version = "1.0.3"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")
@@ -793,6 +793,29 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                         <div class="form-group"><label>From Email</label><input type="email" id="from_email" placeholder="newsletter@yourdomain.com" required></div>
                         <div class="form-group"><label>To Email(s) (comma-separated)</label><input type="text" id="to_emails" placeholder="user1@example.com, user2@example.com" required></div>
                     </div>
+
+                    <div class="form-section">
+                        <h3>⏰ Schedule</h3>
+                        <div class="form-group">
+                            <label>Day of Week</label>
+                            <select id="schedule_day" style="width: 100%; padding: 12px 15px; border: 2px solid #e9ecef; border-radius: 8px; font-size: 1em;">
+                                <option value="Mon">Monday</option>
+                                <option value="Tue">Tuesday</option>
+                                <option value="Wed">Wednesday</option>
+                                <option value="Thu">Thursday</option>
+                                <option value="Fri">Friday</option>
+                                <option value="Sat">Saturday</option>
+                                <option value="Sun" selected>Sunday</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Time (24-hour format)</label>
+                            <input type="time" id="schedule_time" value="09:00" required style="width: 100%; padding: 12px 15px; border: 2px solid #e9ecef; border-radius: 8px; font-size: 1em;">
+                        </div>
+                        <div style="background: #e3f2fd; padding: 10px; border-radius: 6px; font-size: 0.9em; color: #1565c0;">
+                            ℹ️ Newsletter will be sent automatically every <strong><span id="schedule_preview">Sunday at 09:00</span></strong>
+                        </div>
+                    </div>
                     <button type="submit" class="btn btn-primary">💾 Save Configuration</button>
                 </form>
             </div>
@@ -802,7 +825,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                 <div class="action-buttons">
                     <button class="btn btn-success" onclick="testConnections()">🔍 Test Connections</button>
                     <button class="btn btn-primary" onclick="sendNewsletter()">📧 Send Newsletter Now</button>
-                    <button class="btn btn-secondary" onclick="checkSchedule()">⏰ Check Schedule</button>
+                    <button class="btn btn-secondary" onclick="showScheduleInfo()">⏰ View Schedule</button>
                 </div>
                 <div id="testResults" class="test-results"></div>
             </div>
@@ -871,8 +894,22 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                 document.getElementById('mailgun_pass').value = data.mailgun_pass;
                 document.getElementById('from_email').value = data.from_email;
                 document.getElementById('to_emails').value = data.to_emails;
+                document.getElementById('schedule_day').value = data.schedule_day || 'Sun';
+                document.getElementById('schedule_time').value = data.schedule_time || '09:00';
+                updateSchedulePreview();
             }).catch(err => showStatus('configStatus', 'Error loading configuration', 'error'));
         }
+        
+        function updateSchedulePreview() {
+            const day = document.getElementById('schedule_day').options[document.getElementById('schedule_day').selectedIndex].text;
+            const time = document.getElementById('schedule_time').value;
+            document.getElementById('schedule_preview').textContent = day + ' at ' + time;
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('schedule_day').addEventListener('change', updateSchedulePreview);
+            document.getElementById('schedule_time').addEventListener('change', updateSchedulePreview);
+        });
         
         function saveConfig(e) {
             e.preventDefault();
@@ -887,10 +924,12 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                 mailgun_pass: document.getElementById('mailgun_pass').value,
                 from_email: document.getElementById('from_email').value,
                 to_emails: document.getElementById('to_emails').value,
+                schedule_day: document.getElementById('schedule_day').value,
+                schedule_time: document.getElementById('schedule_time').value,
             };
             fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) })
                 .then(r => r.json())
-                .then(() => showStatus('configStatus', '✓ Configuration saved successfully!', 'success'))
+                .then(() => showStatus('configStatus', '✓ Configuration saved successfully! Schedule updated.', 'success'))
                 .catch(() => showStatus('configStatus', '✗ Error saving configuration', 'error'));
         }
         
@@ -917,10 +956,12 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                 .catch(() => showStatus('actionStatus', '✗ Error sending newsletter', 'error'));
         }
         
-        function checkSchedule() {
-            showStatus('actionStatus', '⏰ Checking schedule...', 'info');
+        function showScheduleInfo() {
             fetch('/api/schedule').then(r => r.json())
-                .then(data => showStatus('actionStatus', 'Next run: ' + data.next_run, 'success'))
+                .then(data => {
+                    const msg = 'Next newsletter: ' + data.next_run + '<br>Change schedule in Configuration tab';
+                    showStatus('actionStatus', msg, 'info');
+                })
                 .catch(() => showStatus('actionStatus', '✗ Error checking schedule', 'error'));
         }
         
@@ -1182,25 +1223,36 @@ func updateHandler(w http.ResponseWriter, r *http.Request) {
 	script := `#!/bin/bash
 set -e
 cd /opt/newslettar
+echo "Stopping service..."
+systemctl stop newslettar.service
+sleep 2
 echo "Backing up configuration..."
 cp .env .env.backup
 echo "Downloading latest version..."
 wget -q -O main_new.go https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar/main.go
 if [ ! -f "main_new.go" ]; then
     echo "Download failed"
+    systemctl start newslettar.service
     exit 1
 fi
 echo "Building new version..."
 mv main_new.go main.go
-/usr/local/go/bin/go build -o newslettar main.go
-if [ ! -f "newslettar" ]; then
+/usr/local/go/bin/go build -o newslettar_new main.go
+if [ ! -f "newslettar_new" ]; then
     echo "Build failed"
+    systemctl start newslettar.service
     exit 1
 fi
+echo "Installing new version..."
+mv newslettar newslettar.old
+mv newslettar_new newslettar
+chmod +x newslettar
 echo "Restoring configuration..."
 mv .env.backup .env
-echo "Restarting service..."
-systemctl restart newslettar.service
+echo "Starting service..."
+systemctl start newslettar.service
+sleep 2
+rm -f newslettar.old
 echo "Update complete!"
 `
 

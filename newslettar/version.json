@@ -1,0 +1,10 @@
+{
+  "version": "1.0.2",
+  "released": "2025-11-14",
+  "changelog": [
+    "Added automatic update detection",
+    "Added visual update notification badge",
+    "Fixed config reload in Web UI",
+    "Improved update handler"
+  ]
+}

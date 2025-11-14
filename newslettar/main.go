@@ -88,7 +88,7 @@ type WebConfig struct {
 	ScheduleTime   string `json:"schedule_time"`
 }
 
-const version = "1.0.10"
+const version = "1.0.11"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")
@@ -951,31 +951,31 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                 <form id="configForm" onsubmit="saveConfig(event)">
                     <div class="form-section">
                         <h3><img src="https://raw.githubusercontent.com/Sonarr/Sonarr/develop/Logo/256.png" style="width: 24px; height: 24px; vertical-align: middle; margin-right: 8px;">Sonarr</h3>
-                        <div class="form-group"><label>Sonarr URL</label><input type="text" id="sonarr_url" placeholder="http://192.168.1.100:8989" required></div>
-                        <div class="form-group"><label>Sonarr API Key</label><input type="text" id="sonarr_api_key" placeholder="Your Sonarr API Key" required></div>
+                        <div class="form-group"><label>Sonarr URL</label><input type="text" id="sonarr_url" placeholder="http://192.168.1.100:8989"></div>
+                        <div class="form-group"><label>Sonarr API Key</label><input type="text" id="sonarr_api_key" placeholder="Your Sonarr API Key"></div>
                         <button type="button" class="btn btn-secondary test-connection-btn" onclick="testSonarr()">🔍 Test Connection</button>
-                        <button type="button" class="btn btn-primary test-connection-btn" onclick="saveConfig(event)">💾 Save Sonarr Settings</button>
+                        <button type="button" class="btn btn-primary test-connection-btn" onclick="saveSonarr()">💾 Save Sonarr Settings</button>
                         <div id="sonarrTestResult" class="test-results"></div>
                     </div>
                     <div class="form-section">
                         <h3><img src="https://raw.githubusercontent.com/Radarr/Radarr/develop/Logo/256.png" style="width: 24px; height: 24px; vertical-align: middle; margin-right: 8px;">Radarr</h3>
-                        <div class="form-group"><label>Radarr URL</label><input type="text" id="radarr_url" placeholder="http://192.168.1.100:7878" required></div>
-                        <div class="form-group"><label>Radarr API Key</label><input type="text" id="radarr_api_key" placeholder="Your Radarr API Key" required></div>
+                        <div class="form-group"><label>Radarr URL</label><input type="text" id="radarr_url" placeholder="http://192.168.1.100:7878"></div>
+                        <div class="form-group"><label>Radarr API Key</label><input type="text" id="radarr_api_key" placeholder="Your Radarr API Key"></div>
                         <button type="button" class="btn btn-secondary test-connection-btn" onclick="testRadarr()">🔍 Test Connection</button>
-                        <button type="button" class="btn btn-primary test-connection-btn" onclick="saveConfig(event)">💾 Save Radarr Settings</button>
+                        <button type="button" class="btn btn-primary test-connection-btn" onclick="saveRadarr()">💾 Save Radarr Settings</button>
                         <div id="radarrTestResult" class="test-results"></div>
                     </div>
                     <div class="form-section">
                         <h3>📧 Email Settings</h3>
-                        <div class="form-group"><label>SMTP Server</label><input type="text" id="mailgun_smtp" placeholder="smtp.mailgun.org" required></div>
-                        <div class="form-group"><label>SMTP Port</label><input type="text" id="mailgun_port" placeholder="587" required></div>
-                        <div class="form-group"><label>SMTP Username</label><input type="text" id="mailgun_user" placeholder="postmaster@yourdomain.mailgun.org" required></div>
-                        <div class="form-group"><label>SMTP Password</label><input type="password" id="mailgun_pass" placeholder="Your SMTP Password" required></div>
-                        <div class="form-group"><label>From Email</label><input type="email" id="from_email" placeholder="newsletter@yourdomain.com" required></div>
+                        <div class="form-group"><label>SMTP Server</label><input type="text" id="mailgun_smtp" placeholder="smtp.mailgun.org"></div>
+                        <div class="form-group"><label>SMTP Port</label><input type="text" id="mailgun_port" placeholder="587"></div>
+                        <div class="form-group"><label>SMTP Username</label><input type="text" id="mailgun_user" placeholder="postmaster@yourdomain.mailgun.org"></div>
+                        <div class="form-group"><label>SMTP Password</label><input type="password" id="mailgun_pass" placeholder="Your SMTP Password"></div>
+                        <div class="form-group"><label>From Email</label><input type="email" id="from_email" placeholder="newsletter@yourdomain.com"></div>
                         <div class="form-group"><label>From Name (Sender Display Name)</label><input type="text" id="from_name" placeholder="Newslettar" value="Newslettar"></div>
-                        <div class="form-group"><label>To Email(s) (comma-separated)</label><input type="text" id="to_emails" placeholder="user1@example.com, user2@example.com" required></div>
+                        <div class="form-group"><label>To Email(s) (comma-separated)</label><input type="text" id="to_emails" placeholder="user1@example.com, user2@example.com"></div>
                         <button type="button" class="btn btn-secondary test-connection-btn" onclick="testEmail()">🔍 Test Connection</button>
-                        <button type="button" class="btn btn-primary test-connection-btn" onclick="saveConfig(event)">💾 Save Email Settings</button>
+                        <button type="button" class="btn btn-primary test-connection-btn" onclick="saveEmail()">💾 Save Email Settings</button>
                         <div id="emailTestResult" class="test-results"></div>
                     </div>
 
@@ -995,12 +995,12 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                         </div>
                         <div class="form-group">
                             <label>Time (24-hour format)</label>
-                            <input type="time" id="schedule_time" value="09:00" required>
+                            <input type="time" id="schedule_time" value="09:00">
                         </div>
                         <div style="background: #2d3a4a; padding: 10px; border-radius: 6px; font-size: 0.9em; color: #a0b0d0; border: 1px solid #3a4a5a; margin-bottom: 15px;">
                             ℹ️ Newsletter will be sent automatically every <strong><span id="schedule_preview">Sunday at 09:00</span></strong>
                         </div>
-                        <button type="button" class="btn btn-primary" onclick="saveConfig(event)">💾 Save Schedule</button>
+                        <button type="button" class="btn btn-primary" onclick="saveSchedule()">💾 Save Schedule</button>
                     </div>
                     <button type="submit" class="btn btn-primary" style="margin-top: 20px;">💾 Save All Configuration</button>
                 </form>
@@ -1134,6 +1134,103 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                     updateSystemdTimer();
                 })
                 .catch(() => showStatus('configStatus', '✗ Error saving configuration', 'error'));
+        }
+        
+        function saveSonarr() {
+            const sonarrUrl = document.getElementById('sonarr_url').value;
+            const sonarrKey = document.getElementById('sonarr_api_key').value;
+            
+            if (!sonarrUrl || !sonarrKey) {
+                showStatus('configStatus', '✗ Please fill in both Sonarr URL and API Key', 'error');
+                return;
+            }
+            
+            // Load current config and update only Sonarr fields
+            fetch('/api/config').then(r => r.json()).then(currentConfig => {
+                currentConfig.sonarr_url = sonarrUrl;
+                currentConfig.sonarr_api_key = sonarrKey;
+                
+                fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(currentConfig) })
+                    .then(r => r.json())
+                    .then(() => showStatus('configStatus', '✓ Sonarr settings saved successfully!', 'success'))
+                    .catch(() => showStatus('configStatus', '✗ Error saving Sonarr settings', 'error'));
+            });
+        }
+        
+        function saveRadarr() {
+            const radarrUrl = document.getElementById('radarr_url').value;
+            const radarrKey = document.getElementById('radarr_api_key').value;
+            
+            if (!radarrUrl || !radarrKey) {
+                showStatus('configStatus', '✗ Please fill in both Radarr URL and API Key', 'error');
+                return;
+            }
+            
+            // Load current config and update only Radarr fields
+            fetch('/api/config').then(r => r.json()).then(currentConfig => {
+                currentConfig.radarr_url = radarrUrl;
+                currentConfig.radarr_api_key = radarrKey;
+                
+                fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(currentConfig) })
+                    .then(r => r.json())
+                    .then(() => showStatus('configStatus', '✓ Radarr settings saved successfully!', 'success'))
+                    .catch(() => showStatus('configStatus', '✗ Error saving Radarr settings', 'error'));
+            });
+        }
+        
+        function saveEmail() {
+            const smtp = document.getElementById('mailgun_smtp').value;
+            const port = document.getElementById('mailgun_port').value;
+            const user = document.getElementById('mailgun_user').value;
+            const pass = document.getElementById('mailgun_pass').value;
+            const fromEmail = document.getElementById('from_email').value;
+            const fromName = document.getElementById('from_name').value;
+            const toEmails = document.getElementById('to_emails').value;
+            
+            if (!smtp || !port || !user || !pass || !fromEmail || !toEmails) {
+                showStatus('configStatus', '✗ Please fill in all email fields', 'error');
+                return;
+            }
+            
+            // Load current config and update only Email fields
+            fetch('/api/config').then(r => r.json()).then(currentConfig => {
+                currentConfig.mailgun_smtp = smtp;
+                currentConfig.mailgun_port = port;
+                currentConfig.mailgun_user = user;
+                currentConfig.mailgun_pass = pass;
+                currentConfig.from_email = fromEmail;
+                currentConfig.from_name = fromName;
+                currentConfig.to_emails = toEmails;
+                
+                fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(currentConfig) })
+                    .then(r => r.json())
+                    .then(() => showStatus('configStatus', '✓ Email settings saved successfully!', 'success'))
+                    .catch(() => showStatus('configStatus', '✗ Error saving email settings', 'error'));
+            });
+        }
+        
+        function saveSchedule() {
+            const scheduleDay = document.getElementById('schedule_day').value;
+            const scheduleTime = document.getElementById('schedule_time').value;
+            
+            if (!scheduleDay || !scheduleTime) {
+                showStatus('configStatus', '✗ Please select both day and time', 'error');
+                return;
+            }
+            
+            // Load current config and update only Schedule fields
+            fetch('/api/config').then(r => r.json()).then(currentConfig => {
+                currentConfig.schedule_day = scheduleDay;
+                currentConfig.schedule_time = scheduleTime;
+                
+                fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(currentConfig) })
+                    .then(r => r.json())
+                    .then(() => {
+                        showStatus('configStatus', '✓ Schedule saved successfully!', 'success');
+                        updateSystemdTimer();
+                    })
+                    .catch(() => showStatus('configStatus', '✗ Error saving schedule', 'error'));
+            });
         }
         
         function updateSystemdTimer() {

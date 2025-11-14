@@ -804,3 +804,13 @@ func main() {
 	}
 
 	upcomingMovies, err := fetchRadarrCalendar(cfg, now, nextWeek)
+	if err != nil {
+		log.Printf("⚠️  Error fetching Radarr calendar: %v", err)
+		upcomingMovies = []Movie{}
+	} else {
+		log.Printf("✓ Found %d upcoming movies", len(upcomingMovies))
+	}
+
+	// Group episodes by series
+	log.Println("📊 Grouping episodes by series...")
+	downloadedSeriesGroups := groupEpis

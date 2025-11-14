@@ -79,7 +79,7 @@ type WebConfig struct {
 	ScheduleTime   string `json:"schedule_time"`
 }
 
-const version = "1.0.4"
+const version = "1.0.5"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")
@@ -1007,22 +1007,28 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
         }
         
         function performUpdate() {
-            if (!confirm('This will download and install the latest version. The service will restart. Continue?')) return;
-            showStatus('updateStatus', '🚀 Updating... This may take a minute.', 'info');
-            document.getElementById('updateResults').innerHTML = '<div class="logs">Starting update...</div>';
+            if (!confirm('This will download and install the latest version. The page will be unavailable for ~10 seconds during restart. Continue?')) return;
+            showStatus('updateStatus', '🚀 Update started! Building new version in background...', 'info');
             
             fetch('/api/update', { method: 'POST' }).then(r => r.json())
                 .then(data => {
-                    showStatus('updateStatus', data.success ? '✓ Update complete! Reloading...' : '✗ Update failed: ' + data.message, data.success ? 'success' : 'error');
-                    if (data.success) {
-                        document.getElementById('updateBadge').classList.remove('show');
-                        setTimeout(() => location.reload(), 2000);
-                    }
-                    if (data.output) {
-                        document.getElementById('updateResults').innerHTML = '<div class="logs">' + data.output + '</div>';
-                    }
+                    showStatus('updateStatus', '⏳ Building and restarting... Page will reload automatically.', 'info');
+                    document.getElementById('updateBadge').classList.remove('show');
+                    
+                    // Wait 15 seconds for build + restart, then reload
+                    let countdown = 15;
+                    const countdownInterval = setInterval(() => {
+                        countdown--;
+                        showStatus('updateStatus', '⏳ Restarting service... (' + countdown + 's)', 'info');
+                        if (countdown <= 0) {
+                            clearInterval(countdownInterval);
+                            location.reload();
+                        }
+                    }, 1000);
                 })
-                .catch(() => showStatus('updateStatus', '✗ Update failed', 'error'));
+                .catch(() => {
+                    showStatus('updateStatus', '✗ Update request failed', 'error');
+                });
         }
         
         function showStatus(elementId, message, type) {
@@ -1232,40 +1238,26 @@ func updateHandler(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		time.Sleep(1 * time.Second) // Give response time to send
 
-		script := `#!/bin/bash
-cd /opt/newslettar
-echo "$(date): Starting background update..."
-cp .env .env.backup
-wget -q -O main_new.go https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar/main.go
-if [ ! -f "main_new.go" ]; then
-    echo "$(date): Download failed"
-    exit 1
-fi
-mv main_new.go main.go
-/usr/local/go/bin/go build -o newslettar_new main.go
-if [ ! -f "newslettar_new" ]; then
-    echo "$(date): Build failed"
-    exit 1
-fi
-mv .env.backup .env
-# Replace binary while service is running
-mv newslettar newslettar.old 2>/dev/null || true
-mv newslettar_new newslettar
-chmod +x newslettar
-# Now restart service with new binary
-systemctl restart newslettar.service
-sleep 1
-rm -f newslettar.old
-echo "$(date): Update complete!"
-`
-
-		tmpfile, _ := os.CreateTemp("", "update-*.sh")
-		tmpfile.WriteString(script)
-		tmpfile.Close()
-		os.Chmod(tmpfile.Name(), 0755)
-
-		cmd := exec.Command("bash", tmpfile.Name())
-		cmd.Run()
-		os.Remove(tmpfile.Name())
+		cmd := exec.Command("bash", "-c", `
+			cd /opt/newslettar
+			cp .env .env.backup
+			wget -q -O main.go https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar/main.go || exit 1
+			/usr/local/go/bin/go build -o newslettar_new main.go || exit 1
+			mv .env.backup .env
+			chmod +x newslettar_new
+			# Stop service, replace binary, start service
+			systemctl stop newslettar.service
+			mv newslettar newslettar.old
+			mv newslettar_new newslettar
+			systemctl start newslettar.service
+			rm -f newslettar.old
+		`)
+		
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("Update failed: %v, output: %s", err, string(output))
+		} else {
+			log.Printf("Update completed successfully")
+		}
 	}()
 }

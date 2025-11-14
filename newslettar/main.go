@@ -686,22 +686,22 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
     <title>Newslettar v` + version + `</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
-        .container { max-width: 900px; margin: 0 auto; background: white; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden; }
-        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }
-        .header h1 { font-size: 2.5em; margin-bottom: 10px; }
-        .header p { opacity: 0.9; font-size: 1.1em; }
-        .version { position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,0.2); padding: 5px 15px; border-radius: 20px; font-size: 0.9em; }
-        .nav { display: flex; background: #f8f9fa; border-bottom: 2px solid #e9ecef; }
-        .nav-item { flex: 1; padding: 15px; text-align: center; cursor: pointer; border: none; background: none; font-size: 1em; font-weight: 500; color: #6c757d; transition: all 0.3s; }
-        .nav-item:hover { background: #e9ecef; color: #495057; }
-        .nav-item.active { background: white; color: #667eea; border-bottom: 3px solid #667eea; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background: #2d2d2d; min-height: 100vh; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; background: #3a3a3a; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); overflow: hidden; }
+        .header { background: #2d2d2d; color: #e0e0e0; padding: 30px; text-align: center; border-bottom: 2px solid #4a4a4a; }
+        .header h1 { font-size: 2.5em; margin-bottom: 10px; color: #ffffff; }
+        .header p { opacity: 0.9; font-size: 1.1em; color: #b0b0b0; }
+        .version { position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,0.1); padding: 5px 15px; border-radius: 20px; font-size: 0.9em; color: #b0b0b0; }
+        .nav { display: flex; background: #2d2d2d; border-bottom: 2px solid #4a4a4a; }
+        .nav-item { flex: 1; padding: 15px; text-align: center; cursor: pointer; border: none; background: none; font-size: 1em; font-weight: 500; color: #b0b0b0; transition: all 0.3s; }
+        .nav-item:hover { background: #4a4a4a; color: #e0e0e0; }
+        .nav-item.active { background: #3a3a3a; color: #ffffff; border-bottom: 3px solid #6a6a6a; }
         .update-badge {
             position: absolute;
             top: -8px;
             right: -8px;
-            background: #dc3545;
-            color: white;
+            background: #6a4a4a;
+            color: #ffffff;
             border-radius: 50%;
             width: 20px;
             height: 20px;
@@ -719,37 +719,38 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
             0%, 100% { transform: scale(1); }
             50% { transform: scale(1.1); }
         }
-        .content { padding: 30px; }
+        .content { padding: 30px; background: #3a3a3a; }
         .section { display: none; }
         .section.active { display: block; }
         .form-group { margin-bottom: 25px; }
-        .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #2c3e50; }
-        .form-group input { width: 100%; padding: 12px 15px; border: 2px solid #e9ecef; border-radius: 8px; font-size: 1em; transition: border-color 0.3s; }
-        .form-group input:focus { outline: none; border-color: #667eea; }
-        .form-section { background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 25px; }
-        .form-section h3 { color: #495057; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #dee2e6; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #e0e0e0; }
+        .form-group input { width: 100%; padding: 12px 15px; border: 2px solid #4a4a4a; border-radius: 8px; font-size: 1em; transition: border-color 0.3s; background: #2d2d2d; color: #e0e0e0; }
+        .form-group input:focus { outline: none; border-color: #6a6a6a; }
+        .form-group input::placeholder { color: #808080; }
+        .form-section { background: #2d2d2d; padding: 20px; border-radius: 8px; margin-bottom: 25px; border: 1px solid #4a4a4a; }
+        .form-section h3 { color: #e0e0e0; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #4a4a4a; }
         .btn { padding: 12px 30px; border: none; border-radius: 8px; font-size: 1em; font-weight: 600; cursor: pointer; transition: all 0.3s; margin-right: 10px; margin-bottom: 10px; }
-        .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4); }
-        .btn-success { background: #28a745; color: white; }
-        .btn-success:hover { background: #218838; }
-        .btn-danger { background: #dc3545; color: white; }
-        .btn-danger:hover { background: #c82333; }
-        .btn-secondary { background: #6c757d; color: white; }
-        .btn-secondary:hover { background: #5a6268; }
-        .btn-warning { background: #ffc107; color: #212529; }
-        .btn-warning:hover { background: #e0a800; }
+        .btn-primary { background: #4a4a4a; color: #ffffff; border: 1px solid #5a5a5a; }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3); background: #5a5a5a; }
+        .btn-success { background: #4a6a4a; color: white; border: 1px solid #5a7a5a; }
+        .btn-success:hover { background: #5a7a5a; }
+        .btn-danger { background: #6a4a4a; color: white; border: 1px solid #7a5a5a; }
+        .btn-danger:hover { background: #7a5a5a; }
+        .btn-secondary { background: #4a4a4a; color: white; border: 1px solid #5a5a5a; }
+        .btn-secondary:hover { background: #5a5a5a; }
+        .btn-warning { background: #6a6a4a; color: #ffffff; border: 1px solid #7a7a5a; }
+        .btn-warning:hover { background: #7a7a5a; }
         .status-box { padding: 15px; border-radius: 8px; margin-bottom: 15px; display: none; }
-        .status-box.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; display: block; }
-        .status-box.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; display: block; }
-        .status-box.info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; display: block; }
+        .status-box.success { background: #2d4a2d; color: #a0d0a0; border: 1px solid #3a5a3a; display: block; }
+        .status-box.error { background: #4a2d2d; color: #d0a0a0; border: 1px solid #5a3a3a; display: block; }
+        .status-box.info { background: #2d3a4a; color: #a0b0d0; border: 1px solid #3a4a5a; display: block; }
         .test-results { margin-top: 20px; }
-        .test-item { padding: 12px; margin: 8px 0; border-radius: 6px; background: #f8f9fa; border-left: 4px solid #6c757d; }
-        .test-item.success { border-left-color: #28a745; background: #d4edda; }
-        .test-item.error { border-left-color: #dc3545; background: #f8d7da; }
+        .test-item { padding: 12px; margin: 8px 0; border-radius: 6px; background: #2d2d2d; border-left: 4px solid #6a6a6a; color: #e0e0e0; }
+        .test-item.success { border-left-color: #4a6a4a; background: #2d3a2d; color: #a0d0a0; }
+        .test-item.error { border-left-color: #6a4a4a; background: #3a2d2d; color: #d0a0a0; }
         .logs { background: #1e1e1e; color: #d4d4d4; padding: 20px; border-radius: 8px; font-family: 'Courier New', monospace; font-size: 0.9em; max-height: 500px; overflow-y: auto; white-space: pre-wrap; }
         .action-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
-        .update-info { background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .update-info { background: #2d2d2d; border: 1px solid #4a4a4a; padding: 15px; border-radius: 8px; margin-bottom: 20px; color: #e0e0e0; }
         .spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: white; animation: spin 1s ease-in-out infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
     </style>
@@ -798,7 +799,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                         <h3>⏰ Schedule</h3>
                         <div class="form-group">
                             <label>Day of Week</label>
-                            <select id="schedule_day" style="width: 100%; padding: 12px 15px; border: 2px solid #e9ecef; border-radius: 8px; font-size: 1em;">
+                            <select id="schedule_day" style="width: 100%; padding: 12px 15px; border: 2px solid #4a4a4a; border-radius: 8px; font-size: 1em; background: #2d2d2d; color: #e0e0e0;">
                                 <option value="Mon">Monday</option>
                                 <option value="Tue">Tuesday</option>
                                 <option value="Wed">Wednesday</option>
@@ -810,9 +811,9 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                         </div>
                         <div class="form-group">
                             <label>Time (24-hour format)</label>
-                            <input type="time" id="schedule_time" value="09:00" required style="width: 100%; padding: 12px 15px; border: 2px solid #e9ecef; border-radius: 8px; font-size: 1em;">
+                            <input type="time" id="schedule_time" value="09:00" required style="width: 100%; padding: 12px 15px; border: 2px solid #4a4a4a; border-radius: 8px; font-size: 1em; background: #2d2d2d; color: #e0e0e0;">
                         </div>
-                        <div style="background: #e3f2fd; padding: 10px; border-radius: 6px; font-size: 0.9em; color: #1565c0;">
+                        <div style="background: #2d3a4a; padding: 10px; border-radius: 6px; font-size: 0.9em; color: #a0b0d0; border: 1px solid #3a4a5a;">
                             ℹ️ Newsletter will be sent automatically every <strong><span id="schedule_preview">Sunday at 09:00</span></strong>
                         </div>
                     </div>
@@ -821,7 +822,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
             </div>
             <div id="actions" class="section">
                 <div id="actionStatus" class="status-box"></div>
-                <h2 style="margin-bottom: 20px;">Quick Actions</h2>
+                <h2 style="margin-bottom: 20px; color: #e0e0e0;">Quick Actions</h2>
                 <div class="action-buttons">
                     <button class="btn btn-success" onclick="testConnections()">🔍 Test Connections</button>
                     <button class="btn btn-primary" onclick="sendNewsletter()">📧 Send Newsletter Now</button>
@@ -830,21 +831,21 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                 <div id="testResults" class="test-results"></div>
             </div>
             <div id="logs" class="section">
-                <h2 style="margin-bottom: 20px;">Recent Logs</h2>
+                <h2 style="margin-bottom: 20px; color: #e0e0e0;">Recent Logs</h2>
                 <button class="btn btn-secondary" onclick="loadLogs()" style="margin-bottom: 15px;">🔄 Refresh Logs</button>
                 <div id="logsContent" class="logs">Loading logs...</div>
             </div>
             <div id="update" class="section">
                 <div id="updateStatus" class="status-box"></div>
-                <h2 style="margin-bottom: 20px;">Update Newslettar</h2>
+                <h2 style="margin-bottom: 20px; color: #e0e0e0;">Update Newslettar</h2>
                 <div class="update-info">
                     <strong>Current Version:</strong> <span id="currentVersion">` + version + `</span><br>
                     <strong>Latest Version:</strong> <span id="latestVersion">Checking...</span><br>
                     <strong>Repository:</strong> github.com/agencefanfare/lerefuge
                 </div>
-                <div id="changelogSection" style="display: none; margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                    <h3 style="margin-bottom: 10px;">What's New:</h3>
-                    <ul id="changelogList" style="margin-left: 20px;"></ul>
+                <div id="changelogSection" style="display: none; margin-top: 20px; padding: 15px; background: #2d2d2d; border-radius: 8px; border: 1px solid #4a4a4a;">
+                    <h3 style="margin-bottom: 10px; color: #e0e0e0;">What's New:</h3>
+                    <ul id="changelogList" style="margin-left: 20px; color: #b0b0b0;"></ul>
                 </div>
                 <div class="action-buttons" style="margin-top: 20px;">
                     <button class="btn btn-warning" onclick="checkUpdate()">🔍 Check for Updates</button>

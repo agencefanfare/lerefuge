@@ -145,7 +145,7 @@ func fetchSingleEpisode(cfg Config, id int) (SonarrEpisodeDetail, error) {
 func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
 
     url := fmt.Sprintf(
-        "%s/api/v3/history?pageSize=500&sortDirection=descending&includeSeries=true&includeEpisode=true",
+        "%s/api/v3/history?pageSize=500&sortDirection=descending&includeSeries=true&includeEpisode=true&includeEpisodeFile=true",
         cfg.SonarrURL,
     )
 

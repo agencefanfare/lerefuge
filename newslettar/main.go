@@ -852,7 +852,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                 data.results.forEach(result => {
                     const status = result.success ? 'success' : 'error';
                     const icon = result.success ? '✓' : '✗';
-                    html += \`<div class="test-item \${status}">\${icon} \${result.name}: \${result.message}</div>\`;
+                    html += '<div class="test-item ' + status + '">' + icon + ' ' + result.name + ': ' + result.message + '</div>';
                 });
                 document.getElementById('testResults').innerHTML = html;
                 showStatus('actionStatus', data.overall_success ? '✓ All tests passed!' : '⚠ Some tests failed', data.overall_success ? 'success' : 'error');
@@ -870,7 +870,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
         function checkSchedule() {
             showStatus('actionStatus', '⏰ Checking schedule...', 'info');
             fetch('/api/schedule').then(r => r.json())
-                .then(data => showStatus('actionStatus', \`Next run: \${data.next_run}\`, 'success'))
+                .then(data => showStatus('actionStatus', 'Next run: ' + data.next_run, 'success'))
                 .catch(() => showStatus('actionStatus', '✗ Error checking schedule', 'error'));
         }
         
@@ -885,7 +885,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
             fetch('/api/version').then(r => r.json())
                 .then(data => {
                     const msg = data.update_available ? 
-                        \`✓ Update available: \${data.latest_version}\` : 
+                        '✓ Update available: ' + data.latest_version : 
                         '✓ You are running the latest version';
                     showStatus('updateStatus', msg, data.update_available ? 'info' : 'success');
                 })
@@ -904,7 +904,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                         setTimeout(() => location.reload(), 2000);
                     }
                     if (data.output) {
-                        document.getElementById('updateResults').innerHTML = \`<div class="logs">\${data.output}</div>\`;
+                        document.getElementById('updateResults').innerHTML = '<div class="logs">' + data.output + '</div>';
                     }
                 })
                 .catch(() => showStatus('updateStatus', '✗ Update failed', 'error'));

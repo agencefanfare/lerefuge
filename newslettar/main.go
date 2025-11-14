@@ -79,7 +79,7 @@ type WebConfig struct {
 	ScheduleTime   string `json:"schedule_time"`
 }
 
-const version = "1.0.3"
+const version = "1.0.4"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")
@@ -1220,61 +1220,52 @@ func versionHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func updateHandler(w http.ResponseWriter, r *http.Request) {
-	script := `#!/bin/bash
-set -e
+	// Send response immediately so UI doesn't hang
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Update started! Building in background...",
+		"output":  "The service will restart automatically when ready.",
+	})
+
+	// Run update in background
+	go func() {
+		time.Sleep(1 * time.Second) // Give response time to send
+
+		script := `#!/bin/bash
 cd /opt/newslettar
-echo "Stopping service..."
-systemctl stop newslettar.service
-sleep 2
-echo "Backing up configuration..."
+echo "$(date): Starting background update..."
 cp .env .env.backup
-echo "Downloading latest version..."
 wget -q -O main_new.go https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar/main.go
 if [ ! -f "main_new.go" ]; then
-    echo "Download failed"
-    systemctl start newslettar.service
+    echo "$(date): Download failed"
     exit 1
 fi
-echo "Building new version..."
 mv main_new.go main.go
 /usr/local/go/bin/go build -o newslettar_new main.go
 if [ ! -f "newslettar_new" ]; then
-    echo "Build failed"
-    systemctl start newslettar.service
+    echo "$(date): Build failed"
     exit 1
 fi
-echo "Installing new version..."
-mv newslettar newslettar.old
+mv .env.backup .env
+# Replace binary while service is running
+mv newslettar newslettar.old 2>/dev/null || true
 mv newslettar_new newslettar
 chmod +x newslettar
-echo "Restoring configuration..."
-mv .env.backup .env
-echo "Starting service..."
-systemctl start newslettar.service
-sleep 2
+# Now restart service with new binary
+systemctl restart newslettar.service
+sleep 1
 rm -f newslettar.old
-echo "Update complete!"
+echo "$(date): Update complete!"
 `
 
-	tmpfile, _ := os.CreateTemp("", "update-*.sh")
-	tmpfile.WriteString(script)
-	tmpfile.Close()
-	os.Chmod(tmpfile.Name(), 0755)
+		tmpfile, _ := os.CreateTemp("", "update-*.sh")
+		tmpfile.WriteString(script)
+		tmpfile.Close()
+		os.Chmod(tmpfile.Name(), 0755)
 
-	cmd := exec.Command("bash", tmpfile.Name())
-	output, err := cmd.CombinedOutput()
-	os.Remove(tmpfile.Name())
-
-	success := err == nil
-	message := "Update completed successfully! Page will reload..."
-	if !success {
-		message = "Update failed: " + string(output)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": success,
-		"message": message,
-		"output":  string(output),
-	})
+		cmd := exec.Command("bash", tmpfile.Name())
+		cmd.Run()
+		os.Remove(tmpfile.Name())
+	}()
 }

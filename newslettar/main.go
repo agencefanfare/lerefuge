@@ -88,7 +88,7 @@ type WebConfig struct {
 	ScheduleTime   string `json:"schedule_time"`
 }
 
-const version = "1.0.9"
+const version = "1.0.10"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")
@@ -103,6 +103,24 @@ func main() {
 
 // Newsletter sending logic
 func runNewsletter() {
+	now := time.Now()
+	
+	// Check if this is being run from the web UI manually or from the scheduled timer
+	// We can tell by checking if we're within 5 minutes of a scheduled time
+	isManualRun := os.Getenv("MANUAL_RUN") == "true"
+	
+	if !isManualRun {
+		// Read schedule from timer to check if we should run now
+		scheduleDay, scheduleTime := getScheduleFromTimer()
+		
+		// Check if current time matches schedule (within 5 minutes)
+		if !isScheduledTime(now, scheduleDay, scheduleTime) {
+			log.Printf("⏸️  Not scheduled time. Current: %s, Scheduled: %s %s. Skipping automatic send.", 
+				now.Format("Mon 15:04"), scheduleDay, scheduleTime)
+			return
+		}
+	}
+	
 	// Create lock file to prevent duplicate sends
 	lockFile := "/tmp/newslettar.lock"
 	
@@ -132,7 +150,6 @@ func runNewsletter() {
 	log.Println("🚀 Starting Newslettar - Weekly newsletter generation...")
 	log.Printf("Config: Sonarr=%s, Radarr=%s", cfg.SonarrURL, cfg.RadarrURL)
 
-	now := time.Now()
 	weekStart := now.AddDate(0, 0, -7)
 	weekEnd := now
 
@@ -196,6 +213,70 @@ func runNewsletter() {
 	}
 
 	log.Println("✅ Newsletter sent successfully!")
+}
+
+// Helper function to read schedule from systemd timer
+func getScheduleFromTimer() (string, string) {
+	scheduleDay := "Sun"
+	scheduleTime := "09:00"
+	
+	cmd := exec.Command("systemctl", "cat", "newslettar-send.timer")
+	output, err := cmd.Output()
+	if err == nil {
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "OnCalendar=") {
+				// Parse "OnCalendar=Sun *-*-* 09:00:00"
+				parts := strings.Fields(strings.TrimPrefix(line, "OnCalendar="))
+				if len(parts) >= 3 {
+					scheduleDay = parts[0]
+					timeStr := parts[2]
+					if len(timeStr) >= 5 {
+						scheduleTime = timeStr[:5]
+					}
+				}
+			}
+		}
+	}
+	
+	return scheduleDay, scheduleTime
+}
+
+// Helper function to check if current time matches scheduled time (within 5 minutes)
+func isScheduledTime(now time.Time, scheduleDay string, scheduleTime string) bool {
+	// Map short day names to Go weekday
+	dayMap := map[string]time.Weekday{
+		"Mon": time.Monday,
+		"Tue": time.Tuesday,
+		"Wed": time.Wednesday,
+		"Thu": time.Thursday,
+		"Fri": time.Friday,
+		"Sat": time.Saturday,
+		"Sun": time.Sunday,
+	}
+	
+	expectedWeekday, ok := dayMap[scheduleDay]
+	if !ok {
+		return false
+	}
+	
+	// Check if today is the scheduled day
+	if now.Weekday() != expectedWeekday {
+		return false
+	}
+	
+	// Parse scheduled time
+	scheduledHour := 0
+	scheduledMinute := 0
+	fmt.Sscanf(scheduleTime, "%d:%d", &scheduledHour, &scheduledMinute)
+	
+	// Create scheduled time for today
+	scheduledTime := time.Date(now.Year(), now.Month(), now.Day(), scheduledHour, scheduledMinute, 0, 0, now.Location())
+	
+	// Check if we're within 5 minutes of scheduled time
+	diff := now.Sub(scheduledTime)
+	return diff >= 0 && diff <= 5*time.Minute
 }
 
 func loadConfig() Config {
@@ -1491,7 +1572,8 @@ func testEmailHandler(w http.ResponseWriter, r *http.Request) {
 
 func sendHandler(w http.ResponseWriter, r *http.Request) {
 	cmd := exec.Command("/opt/newslettar/newslettar")
-	cmd.Env = append(os.Environ())
+	// Mark this as a manual run so it bypasses schedule check
+	cmd.Env = append(os.Environ(), "MANUAL_RUN=true")
 	output, err := cmd.CombinedOutput()
 
 	w.Header().Set("Content-Type", "application/json")

@@ -1,13 +1,12 @@
 {
-  "version": "1.0.9",
+  "version": "1.0.10",
   "released": "2025-11-14",
   "changelog": [
-    "Added save buttons to each configuration section (Sonarr, Radarr, Email, Schedule)",
-    "Replaced emoji icons with real Sonarr and Radarr logos",
-    "Fixed duplicate newsletter sends with lock file mechanism (1-hour protection)",
-    "Fixed timer configuration: AccuracySec=1s and Persistent=false to prevent multiple triggers",
-    "Fixed SMTP test to use STARTTLS encryption properly",
-    "Restored original beautiful email template design",
-    "All previous v1.0.8 improvements still included"
+    "CRITICAL FIX: Newsletter now only sends at scheduled time (not on service restart)",
+    "Added schedule validation - checks if current time matches configured schedule (within 5 minutes)",
+    "Manual sends from web UI bypass schedule check",
+    "Prevents unexpected sends when restarting web UI service",
+    "Better logging shows why sends are skipped",
+    "All v1.0.9 improvements included (save buttons, logos, duplicate protection)"
   ]
 }

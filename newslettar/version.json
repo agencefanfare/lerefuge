@@ -1,10 +1,13 @@
 {
-  "version": "1.0.14",
+  "version": "1.0.15",
   "released": "2025-11-14",
   "changelog": [
-    "Fixed version comparison to only show update when remote version is actually NEWER",
-    "No more false update notifications when running newer version than GitHub",
-    "Proper semantic version comparison (1.0.14 vs 1.0.13)",
-    "All v1.0.13 fixes included (save button works, reads from .env file correctly)"
+    "NEW: Email Template tab with live preview!",
+    "NEW: Toggle poster images on/off",
+    "NEW: Toggle Downloaded Last Week section on/off",
+    "Live preview updates as you change settings",
+    "Template settings save to .env file",
+    "Preview uses real data from Sonarr/Radarr",
+    "All v1.0.14 fixes included (save works, version comparison fixed)"
   ]
 }

@@ -1,10 +1,9 @@
 {
-  "version": "1.0.3",
+  "version": "1.0.4",
   "released": "2025-11-14",
   "changelog": [
-    "Added schedule configuration in Web UI",
-    "Choose day and time for automatic newsletters",
-    "Improved 'View Schedule' button",
-    "Real-time schedule preview"
+    "Fixed update mechanism",
+    "Service now stops before binary replacement",
+    "Improved update reliability"
   ]
 }

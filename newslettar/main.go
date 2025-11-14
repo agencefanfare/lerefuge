@@ -46,13 +46,20 @@ type Movie struct {
 	PosterURL   string
 }
 
+// Grouped structures for display
+type SeriesGroup struct {
+	SeriesTitle string
+	PosterURL   string
+	Episodes    []Episode
+}
+
 type NewsletterData struct {
-	WeekStart        string
-	WeekEnd          string
-	DownloadedShows  []Episode
-	DownloadedMovies []Movie
-	UpcomingShows    []Episode
-	UpcomingMovies   []Movie
+	WeekStart           string
+	WeekEnd             string
+	UpcomingSeriesGroups []SeriesGroup
+	UpcomingMovies      []Movie
+	DownloadedSeriesGroups []SeriesGroup
+	DownloadedMovies    []Movie
 }
 
 func loadConfig() Config {
@@ -80,6 +87,41 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func groupEpisodesBySeries(episodes []Episode) []SeriesGroup {
+	seriesMap := make(map[string]*SeriesGroup)
+	
+	for _, ep := range episodes {
+		if _, exists := seriesMap[ep.SeriesTitle]; !exists {
+			seriesMap[ep.SeriesTitle] = &SeriesGroup{
+				SeriesTitle: ep.SeriesTitle,
+				PosterURL:   ep.PosterURL,
+				Episodes:    []Episode{},
+			}
+		}
+		seriesMap[ep.SeriesTitle].Episodes = append(seriesMap[ep.SeriesTitle].Episodes, ep)
+	}
+	
+	// Convert map to slice and sort
+	var groups []SeriesGroup
+	for _, group := range seriesMap {
+		// Sort episodes within each group
+		sort.Slice(group.Episodes, func(i, j int) bool {
+			if group.Episodes[i].SeasonNum != group.Episodes[j].SeasonNum {
+				return group.Episodes[i].SeasonNum < group.Episodes[j].SeasonNum
+			}
+			return group.Episodes[i].EpisodeNum < group.Episodes[j].EpisodeNum
+		})
+		groups = append(groups, *group)
+	}
+	
+	// Sort groups by series title
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].SeriesTitle < groups[j].SeriesTitle
+	})
+	
+	return groups
 }
 
 func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
@@ -404,34 +446,99 @@ func generateHTML(data NewsletterData) (string, error) {
         }
         h2 { 
             color: #34495e; 
-            margin-top: 30px; 
+            margin-top: 40px; 
             border-left: 4px solid #3498db; 
             padding-left: 15px; 
         }
         h3 { 
             color: #2c3e50; 
-            margin-top: 20px; 
+            margin-top: 25px; 
             margin-bottom: 15px; 
             font-size: 1.2em; 
         }
         .section { 
             margin-bottom: 30px; 
         }
-        .item { 
+        .series-group {
+            margin-bottom: 25px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: #fafafa;
+        }
+        .series-header {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            background-color: #f0f0f0;
+            border-bottom: 2px solid #3498db;
+        }
+        .poster {
+            width: 60px;
+            height: 90px;
+            object-fit: cover;
+            border-radius: 4px;
+            margin-right: 15px;
+            flex-shrink: 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .poster-placeholder {
+            width: 60px;
+            height: 90px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 4px;
+            margin-right: 15px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            color: white;
+        }
+        .series-title {
+            font-weight: bold;
+            font-size: 1.3em;
+            color: #2c3e50;
+        }
+        .episode-list {
+            padding: 10px 15px;
+        }
+        .episode-item {
+            padding: 10px;
+            margin: 5px 0;
+            background-color: white;
+            border-left: 3px solid #3498db;
+            border-radius: 4px;
+        }
+        .episode-number {
+            font-weight: 600;
+            color: #3498db;
+            display: inline-block;
+            min-width: 70px;
+        }
+        .episode-title {
+            color: #2c3e50;
+        }
+        .episode-date {
+            color: #7f8c8d;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+        .movie-item { 
             display: flex;
             padding: 15px; 
             margin: 12px 0; 
             background-color: #f8f9fa; 
-            border-left: 3px solid #3498db; 
+            border-left: 3px solid #e74c3c; 
             border-radius: 8px;
             align-items: flex-start;
             transition: transform 0.2s;
         }
-        .item:hover {
+        .movie-item:hover {
             transform: translateX(5px);
             background-color: #e9ecef;
         }
-        .poster {
+        .movie-poster {
             width: 80px;
             height: 120px;
             object-fit: cover;
@@ -440,10 +547,10 @@ func generateHTML(data NewsletterData) (string, error) {
             flex-shrink: 0;
             box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
-        .poster-placeholder {
+        .movie-poster-placeholder {
             width: 80px;
             height: 120px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
             border-radius: 6px;
             margin-right: 15px;
             flex-shrink: 0;
@@ -453,19 +560,8 @@ func generateHTML(data NewsletterData) (string, error) {
             font-size: 36px;
             color: white;
         }
-        .content {
+        .movie-content {
             flex: 1;
-        }
-        .show-title { 
-            font-weight: bold; 
-            color: #2c3e50; 
-            font-size: 1.1em;
-            margin-bottom: 5px;
-        }
-        .episode-info { 
-            color: #7f8c8d; 
-            font-size: 0.95em; 
-            margin-top: 3px;
         }
         .movie-title { 
             font-weight: bold; 
@@ -497,70 +593,55 @@ func generateHTML(data NewsletterData) (string, error) {
             font-size: 0.85em;
             text-align: center;
         }
+        .count-badge {
+            background-color: #3498db;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            margin-left: 10px;
+            font-weight: normal;
+        }
+        .downloaded-section {
+            margin-top: 50px;
+            padding-top: 30px;
+            border-top: 2px dashed #e0e0e0;
+        }
+        .downloaded-section h2 {
+            color: #7f8c8d;
+            border-left-color: #95a5a6;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📺 Weekly Media Newsletter</h1>
+        <h1>📺 Newslettar</h1>
         <div class="date-range">Week of {{ .WeekStart }} - {{ .WeekEnd }}</div>
 
-        <div class="section">
-            <h2>📥 Downloaded This Week</h2>
-            
-            <h3>TV Shows ({{ len .DownloadedShows }})</h3>
-            {{ if .DownloadedShows }}
-                {{ range .DownloadedShows }}
-                <div class="item">
-                    {{ if .PosterURL }}
-                        <img src="{{ .PosterURL }}" alt="{{ .SeriesTitle }}" class="poster" />
-                    {{ else }}
-                        <div class="poster-placeholder">📺</div>
-                    {{ end }}
-                    <div class="content">
-                        <div class="show-title">{{ .SeriesTitle }}</div>
-                        <div class="episode-info">S{{ printf "%02d" .SeasonNum }}E{{ printf "%02d" .EpisodeNum }}{{ if .Title }} - {{ .Title }}{{ end }}</div>
-                    </div>
-                </div>
-                {{ end }}
-            {{ else }}
-                <div class="empty">No shows downloaded this week</div>
-            {{ end }}
-
-            <h3>Movies ({{ len .DownloadedMovies }})</h3>
-            {{ if .DownloadedMovies }}
-                {{ range .DownloadedMovies }}
-                <div class="item">
-                    {{ if .PosterURL }}
-                        <img src="{{ .PosterURL }}" alt="{{ .Title }}" class="poster" />
-                    {{ else }}
-                        <div class="poster-placeholder">🎬</div>
-                    {{ end }}
-                    <div class="content">
-                        <div class="movie-title">{{ .Title }}</div>
-                        <div class="movie-year">({{ .Year }})</div>
-                    </div>
-                </div>
-                {{ end }}
-            {{ else }}
-                <div class="empty">No movies downloaded this week</div>
-            {{ end }}
-        </div>
-
+        <!-- UPCOMING RELEASES FIRST -->
         <div class="section">
             <h2>📅 Coming Next Week</h2>
             
-            <h3>TV Shows ({{ len .UpcomingShows }})</h3>
-            {{ if .UpcomingShows }}
-                {{ range .UpcomingShows }}
-                <div class="item">
-                    {{ if .PosterURL }}
-                        <img src="{{ .PosterURL }}" alt="{{ .SeriesTitle }}" class="poster" />
-                    {{ else }}
-                        <div class="poster-placeholder">📺</div>
-                    {{ end }}
-                    <div class="content">
-                        <div class="show-title">{{ .SeriesTitle }}</div>
-                        <div class="episode-info">S{{ printf "%02d" .SeasonNum }}E{{ printf "%02d" .EpisodeNum }}{{ if .Title }} - {{ .Title }}{{ end }}{{ if .AirDate }} ({{ .AirDate }}){{ end }}</div>
+            <h3>TV Shows <span class="count-badge">{{ len .UpcomingSeriesGroups }}</span></h3>
+            {{ if .UpcomingSeriesGroups }}
+                {{ range .UpcomingSeriesGroups }}
+                <div class="series-group">
+                    <div class="series-header">
+                        {{ if .PosterURL }}
+                            <img src="{{ .PosterURL }}" alt="{{ .SeriesTitle }}" class="poster" />
+                        {{ else }}
+                            <div class="poster-placeholder">📺</div>
+                        {{ end }}
+                        <div class="series-title">{{ .SeriesTitle }} <span style="color: #7f8c8d; font-size: 0.8em; font-weight: normal;">({{ len .Episodes }} episode{{ if gt (len .Episodes) 1 }}s{{ end }})</span></div>
+                    </div>
+                    <div class="episode-list">
+                        {{ range .Episodes }}
+                        <div class="episode-item">
+                            <span class="episode-number">S{{ printf "%02d" .SeasonNum }}E{{ printf "%02d" .EpisodeNum }}</span>
+                            <span class="episode-title">{{ if .Title }}{{ .Title }}{{ else }}TBA{{ end }}</span>
+                            {{ if .AirDate }}<span class="episode-date">{{ .AirDate }}</span>{{ end }}
+                        </div>
+                        {{ end }}
                     </div>
                 </div>
                 {{ end }}
@@ -568,23 +649,73 @@ func generateHTML(data NewsletterData) (string, error) {
                 <div class="empty">No shows scheduled for next week</div>
             {{ end }}
 
-            <h3>Movies ({{ len .UpcomingMovies }})</h3>
+            <h3>Movies <span class="count-badge">{{ len .UpcomingMovies }}</span></h3>
             {{ if .UpcomingMovies }}
                 {{ range .UpcomingMovies }}
-                <div class="item">
+                <div class="movie-item">
                     {{ if .PosterURL }}
-                        <img src="{{ .PosterURL }}" alt="{{ .Title }}" class="poster" />
+                        <img src="{{ .PosterURL }}" alt="{{ .Title }}" class="movie-poster" />
                     {{ else }}
-                        <div class="poster-placeholder">🎬</div>
+                        <div class="movie-poster-placeholder">🎬</div>
                     {{ end }}
-                    <div class="content">
+                    <div class="movie-content">
                         <div class="movie-title">{{ .Title }}</div>
-                        <div class="movie-year">({{ .Year }}){{ if .ReleaseDate }} - Release: {{ .ReleaseDate }}{{ end }}</div>
+                        <div class="movie-year">({{ .Year }}){{ if .ReleaseDate }} • {{ .ReleaseDate }}{{ end }}</div>
                     </div>
                 </div>
                 {{ end }}
             {{ else }}
                 <div class="empty">No movies scheduled for next week</div>
+            {{ end }}
+        </div>
+
+        <!-- DOWNLOADED SECTION (LESS PROMINENT) -->
+        <div class="section downloaded-section">
+            <h2>📥 Downloaded Last Week</h2>
+            
+            <h3>TV Shows <span class="count-badge">{{ len .DownloadedSeriesGroups }}</span></h3>
+            {{ if .DownloadedSeriesGroups }}
+                {{ range .DownloadedSeriesGroups }}
+                <div class="series-group">
+                    <div class="series-header">
+                        {{ if .PosterURL }}
+                            <img src="{{ .PosterURL }}" alt="{{ .SeriesTitle }}" class="poster" />
+                        {{ else }}
+                            <div class="poster-placeholder">📺</div>
+                        {{ end }}
+                        <div class="series-title">{{ .SeriesTitle }} <span style="color: #7f8c8d; font-size: 0.8em; font-weight: normal;">({{ len .Episodes }} episode{{ if gt (len .Episodes) 1 }}s{{ end }})</span></div>
+                    </div>
+                    <div class="episode-list">
+                        {{ range .Episodes }}
+                        <div class="episode-item">
+                            <span class="episode-number">S{{ printf "%02d" .SeasonNum }}E{{ printf "%02d" .EpisodeNum }}</span>
+                            <span class="episode-title">{{ if .Title }}{{ .Title }}{{ else }}Episode {{ .EpisodeNum }}{{ end }}</span>
+                        </div>
+                        {{ end }}
+                    </div>
+                </div>
+                {{ end }}
+            {{ else }}
+                <div class="empty">No shows downloaded this week</div>
+            {{ end }}
+
+            <h3>Movies <span class="count-badge">{{ len .DownloadedMovies }}</span></h3>
+            {{ if .DownloadedMovies }}
+                {{ range .DownloadedMovies }}
+                <div class="movie-item">
+                    {{ if .PosterURL }}
+                        <img src="{{ .PosterURL }}" alt="{{ .Title }}" class="movie-poster" />
+                    {{ else }}
+                        <div class="movie-poster-placeholder">🎬</div>
+                    {{ end }}
+                    <div class="movie-content">
+                        <div class="movie-title">{{ .Title }}</div>
+                        <div class="movie-year">({{ .Year }})</div>
+                    </div>
+                </div>
+                {{ end }}
+            {{ else }}
+                <div class="empty">No movies downloaded this week</div>
             {{ end }}
         </div>
 
@@ -652,7 +783,7 @@ func main() {
 		log.Printf("⚠️  Error fetching Sonarr history: %v", err)
 		downloadedShows = []Episode{}
 	} else {
-		log.Printf("✓ Found %d downloaded shows", len(downloadedShows))
+		log.Printf("✓ Found %d downloaded episodes", len(downloadedShows))
 	}
 
 	upcomingShows, err := fetchSonarrCalendar(cfg, now, nextWeek)
@@ -660,7 +791,7 @@ func main() {
 		log.Printf("⚠️  Error fetching Sonarr calendar: %v", err)
 		upcomingShows = []Episode{}
 	} else {
-		log.Printf("✓ Found %d upcoming shows", len(upcomingShows))
+		log.Printf("✓ Found %d upcoming episodes", len(upcomingShows))
 	}
 
 	log.Println("🎬 Fetching Radarr data...")
@@ -673,54 +804,3 @@ func main() {
 	}
 
 	upcomingMovies, err := fetchRadarrCalendar(cfg, now, nextWeek)
-	if err != nil {
-		log.Printf("⚠️  Error fetching Radarr calendar: %v", err)
-		upcomingMovies = []Movie{}
-	} else {
-		log.Printf("✓ Found %d upcoming movies", len(upcomingMovies))
-	}
-
-	// Sort by title
-	sort.Slice(downloadedShows, func(i, j int) bool {
-		return downloadedShows[i].SeriesTitle < downloadedShows[j].SeriesTitle
-	})
-	sort.Slice(upcomingShows, func(i, j int) bool {
-		if upcomingShows[i].AirDate == upcomingShows[j].AirDate {
-			return upcomingShows[i].SeriesTitle < upcomingShows[j].SeriesTitle
-		}
-		return upcomingShows[i].AirDate < upcomingShows[j].AirDate
-	})
-	sort.Slice(downloadedMovies, func(i, j int) bool {
-		return downloadedMovies[i].Title < downloadedMovies[j].Title
-	})
-	sort.Slice(upcomingMovies, func(i, j int) bool {
-		if upcomingMovies[i].ReleaseDate == upcomingMovies[j].ReleaseDate {
-			return upcomingMovies[i].Title < upcomingMovies[j].Title
-		}
-		return upcomingMovies[i].ReleaseDate < upcomingMovies[j].ReleaseDate
-	})
-
-	data := NewsletterData{
-		WeekStart:        weekAgo.Format("Jan 2"),
-		WeekEnd:          now.Format("Jan 2, 2006"),
-		DownloadedShows:  downloadedShows,
-		DownloadedMovies: downloadedMovies,
-		UpcomingShows:    upcomingShows,
-		UpcomingMovies:   upcomingMovies,
-	}
-
-	log.Println("📝 Generating HTML...")
-	html, err := generateHTML(data)
-	if err != nil {
-		log.Fatalf("❌ Error generating HTML: %v", err)
-	}
-
-	subject := fmt.Sprintf("Newslettar - Week of %s", now.Format("Jan 2, 2006"))
-
-	log.Println("📧 Sending email...")
-	if err := sendEmail(cfg, subject, html); err != nil {
-		log.Fatalf("❌ Error sending email: %v", err)
-	}
-
-	log.Println("✅ Newsletter sent successfully!")
-}

@@ -143,127 +143,90 @@ func fetchSingleEpisode(cfg Config, id int) (SonarrEpisodeDetail, error) {
 //////////////////////////////////////////////////////////////////////////////////////
 
 func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
+    url := fmt.Sprintf(
+        "%s/api/v3/history?pageSize=500&sortDirection=descending&includeSeries=true&includeEpisode=true",
+        cfg.SonarrURL,
+    )
 
-	url := fmt.Sprintf(
-		"%s/api/v3/history?pageSize=500&sortDirection=descending&includeSeries=true&includeEpisode=true",
-		cfg.SonarrURL,
-	)
+    req, _ := http.NewRequest("GET", url, nil)
+    req.Header.Set("X-Api-Key", cfg.SonarrAPIKey)
 
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("X-Api-Key", cfg.SonarrAPIKey)
+    client := &http.Client{Timeout: 15 * time.Second}
+    resp, err := client.Do(req)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+    body, _ := io.ReadAll(resp.Body)
 
-	body, _ := io.ReadAll(resp.Body)
+    var result struct {
+        Records []struct {
+            EventType   string    `json:"eventType"`
+            Date        time.Time `json:"date"`
+            EpisodeID   int       `json:"episodeId"`
+            SeriesID    int       `json:"seriesId"`
+            SourceTitle string    `json:"sourceTitle"`
+            Episode     struct {
+                SeasonNumber  int    `json:"seasonNumber"`
+                EpisodeNumber int    `json:"episodeNumber"`
+                Title         string `json:"title"`
+                AirDate       string `json:"airDate"`
+            } `json:"episode"`
+            Series struct {
+                Title string `json:"title"`
+            } `json:"series"`
+        } `json:"records"`
+    }
 
-	var result struct {
-		Records []struct {
-			SeriesID    int       `json:"seriesId"`
-			EpisodeID   int       `json:"episodeId"`
-			SourceTitle string    `json:"sourceTitle"`
-			Date        time.Time `json:"date"`
-			EventType   string    `json:"eventType"`
+    if err := json.Unmarshal(body, &result); err != nil {
+        return nil, err
+    }
 
-			Series struct {
-				Title string `json:"title"`
-			} `json:"series"`
+    var episodes []Episode
+    seen := make(map[int]bool)
 
-			Episode struct {
-				SeasonNumber  int    `json:"seasonNumber"`
-				EpisodeNumber int    `json:"episodeNumber"`
-				Title         string `json:"title"`
-				AirDate       string `json:"airDate"`
-			} `json:"episode"`
-		} `json:"records"`
-	}
+    for _, r := range result.Records {
 
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
-	}
+        // Only include VERY specific import events
+        if r.EventType != "downloadFolderImported" &&
+            r.EventType != "episodeFileImported" &&
+            r.EventType != "downloaded" {
+            continue
+        }
 
-	var episodes []Episode
-	seen := make(map[string]bool)
+        if r.Date.Before(since) {
+            continue
+        }
 
-	for _, record := range result.Records {
+        // Deduplicate by episodeId
+        if seen[r.EpisodeID] {
+            continue
+        }
+        seen[r.EpisodeID] = true
 
-		ev := strings.ToLower(record.EventType)
-		valid := strings.Contains(ev, "import") ||
-			ev == "downloaded" ||
-			ev == "episodefileadded"
+        // Build episode entry directly from Sonarr's full data
+        ep := Episode{
+            SeriesTitle: r.Series.Title,
+            SeasonNum:   r.Episode.SeasonNumber,
+            EpisodeNum:  r.Episode.EpisodeNumber,
+            Title:       r.Episode.Title,
+            AirDate:     r.Episode.AirDate,
+            Downloaded:  true,
+        }
 
-		if !valid {
-			continue
-		}
+        // Final safety fallback if something was missing
+        if ep.SeriesTitle == "" {
+            ep.SeriesTitle = parseSeriesFromSource(r.SourceTitle)
+        }
+        if ep.Title == "" {
+            ep.Title = parseEpisodeTitleFromSource(r.SourceTitle)
+        }
 
-		if record.Date.Before(since) {
-			continue
-		}
+        episodes = append(episodes, ep)
+    }
 
-		key := fmt.Sprintf("%d-%d", record.SeriesID, record.EpisodeID)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-
-		seriesTitle := record.Series.Title
-		season := record.Episode.SeasonNumber
-		epNum := record.Episode.EpisodeNumber
-		epTitle := record.Episode.Title
-		air := record.Episode.AirDate
-
-		// STEP 1 — If EpisodeID exists, get full detail
-		if record.EpisodeID > 0 {
-			full, err := fetchSingleEpisode(cfg, record.EpisodeID)
-			if err == nil {
-				if full.Series.Title != "" {
-					seriesTitle = full.Series.Title
-				}
-				if full.SeasonNumber > 0 {
-					season = full.SeasonNumber
-				}
-				if full.EpisodeNumber > 0 {
-					epNum = full.EpisodeNumber
-				}
-				if full.Title != "" {
-					epTitle = full.Title
-				}
-				if full.AirDate != "" {
-					air = full.AirDate
-				}
-			}
-		}
-
-		// STEP 2 — parse sourceTitle if still empty
-		if seriesTitle == "" {
-			seriesTitle = parseSeriesFromSource(record.SourceTitle)
-		}
-		if epTitle == "" {
-			epTitle = parseEpisodeTitleFromSource(record.SourceTitle)
-		}
-		if season == 0 || epNum == 0 {
-			m := reSource.FindStringSubmatch(record.SourceTitle)
-			if len(m) == 4 {
-				season = atoiSafe(m[2])
-				epNum = atoiSafe(m[3])
-			}
-		}
-
-		episodes = append(episodes, Episode{
-			SeriesTitle: seriesTitle,
-			SeasonNum:   season,
-			EpisodeNum:  epNum,
-			Title:       epTitle,
-			AirDate:     air,
-			Downloaded:  true,
-		})
-	}
-
-	return episodes, nil
+    return episodes, nil
 }
 
 //////////////////////////////////////////////////////////////////////////////////////

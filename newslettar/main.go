@@ -143,6 +143,7 @@ func fetchSingleEpisode(cfg Config, id int) (SonarrEpisodeDetail, error) {
 //////////////////////////////////////////////////////////////////////////////////////
 
 func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
+
     url := fmt.Sprintf(
         "%s/api/v3/history?pageSize=500&sortDirection=descending&includeSeries=true&includeEpisode=true",
         cfg.SonarrURL,
@@ -160,22 +161,33 @@ func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
 
     body, _ := io.ReadAll(resp.Body)
 
+    // Allowed import events
+    importEvents := map[string]bool{
+        "downloadfolderimported": true,
+        "episodefileadded":       true,
+        "episodefileimported":    true,
+        "downloaded":             true,
+    }
+
     var result struct {
         Records []struct {
-            EventType   string    `json:"eventType"`
-            Date        time.Time `json:"date"`
-            EpisodeID   int       `json:"episodeId"`
-            SeriesID    int       `json:"seriesId"`
-            SourceTitle string    `json:"sourceTitle"`
-            Episode     struct {
+            EventType string    `json:"eventType"`
+            Date      time.Time `json:"date"`
+
+            Episode struct {
                 SeasonNumber  int    `json:"seasonNumber"`
                 EpisodeNumber int    `json:"episodeNumber"`
                 Title         string `json:"title"`
                 AirDate       string `json:"airDate"`
             } `json:"episode"`
+
             Series struct {
                 Title string `json:"title"`
             } `json:"series"`
+
+            EpisodeID   int    `json:"episodeId"`
+            SeriesID    int    `json:"seriesId"`
+            SourceTitle string `json:"sourceTitle"`
         } `json:"records"`
     }
 
@@ -188,10 +200,10 @@ func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
 
     for _, r := range result.Records {
 
-        // Only include VERY specific import events
-        if r.EventType != "downloadFolderImported" &&
-            r.EventType != "episodeFileImported" &&
-            r.EventType != "downloaded" {
+        ev := strings.ToLower(r.EventType)
+
+        // Only accept valid import events
+        if !importEvents[ev] {
             continue
         }
 
@@ -199,13 +211,12 @@ func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
             continue
         }
 
-        // Deduplicate by episodeId
+        // Deduplicate
         if seen[r.EpisodeID] {
             continue
         }
         seen[r.EpisodeID] = true
 
-        // Build episode entry directly from Sonarr's full data
         ep := Episode{
             SeriesTitle: r.Series.Title,
             SeasonNum:   r.Episode.SeasonNumber,
@@ -215,7 +226,7 @@ func fetchSonarrHistory(cfg Config, since time.Time) ([]Episode, error) {
             Downloaded:  true,
         }
 
-        // Final safety fallback if something was missing
+        // Fallback for anything missing
         if ep.SeriesTitle == "" {
             ep.SeriesTitle = parseSeriesFromSource(r.SourceTitle)
         }

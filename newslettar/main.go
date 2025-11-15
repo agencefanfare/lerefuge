@@ -90,7 +90,7 @@ type WebConfig struct {
 	ShowDownloaded string `json:"show_downloaded"`
 }
 
-const version = "1.0.16"
+const version = "1.0.17"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")
@@ -123,29 +123,32 @@ func runNewsletter() {
 		}
 	}
 	
-	// Create lock file to prevent duplicate sends
+	// Create lock file to prevent duplicate sends (only for scheduled runs)
 	lockFile := "/tmp/newslettar.lock"
 	
-	// Check if lock file exists and is recent (less than 1 hour old)
-	if info, err := os.Stat(lockFile); err == nil {
-		if time.Since(info.ModTime()) < 1*time.Hour {
-			log.Println("⏸️  Newsletter already sent recently (lock file exists). Skipping to prevent duplicates.")
-			return
-		}
-		// Lock file is old, remove it
-		os.Remove(lockFile)
-	}
-	
-	// Create lock file
-	if err := os.WriteFile(lockFile, []byte(time.Now().Format(time.RFC3339)), 0644); err != nil {
-		log.Printf("⚠️  Warning: Could not create lock file: %v", err)
-	}
-	defer func() {
-		// Keep lock file for 1 hour to prevent duplicates
-		time.AfterFunc(1*time.Hour, func() {
+	// Skip lock file check during manual runs
+	if !isManualRun {
+		// Check if lock file exists and is recent (less than 1 hour old)
+		if info, err := os.Stat(lockFile); err == nil {
+			if time.Since(info.ModTime()) < 1*time.Hour {
+				log.Println("⏸️  Newsletter already sent recently (lock file exists). Skipping to prevent duplicates.")
+				return
+			}
+			// Lock file is old, remove it
 			os.Remove(lockFile)
-		})
-	}()
+		}
+		
+		// Create lock file
+		if err := os.WriteFile(lockFile, []byte(time.Now().Format(time.RFC3339)), 0644); err != nil {
+			log.Printf("⚠️  Warning: Could not create lock file: %v", err)
+		}
+		defer func() {
+			// Keep lock file for 1 hour to prevent duplicates
+			time.AfterFunc(1*time.Hour, func() {
+				os.Remove(lockFile)
+			})
+		}()
+	}
 
 	cfg := loadConfig()
 
@@ -201,8 +204,13 @@ func runNewsletter() {
 		DownloadedMovies:       downloadedMovies,
 	}
 
+	// Load template settings from .env file
+	envMap := readEnvFile()
+	showPosters := getEnvFromFile(envMap, "SHOW_POSTERS", "true") != "false"
+	showDownloaded := getEnvFromFile(envMap, "SHOW_DOWNLOADED", "true") != "false"
+	
 	log.Println("📝 Generating newsletter HTML...")
-	html, err := generateNewsletterHTML(data)
+	html, err := generateNewsletterHTMLWithOptions(data, showPosters, showDownloaded)
 	if err != nil {
 		log.Fatalf("❌ Failed to generate HTML: %v", err)
 	}
@@ -884,7 +892,6 @@ func startWebServer() {
 	http.HandleFunc("/api/logs", logsHandler)
 	http.HandleFunc("/api/update", updateHandler)
 	http.HandleFunc("/api/version", versionHandler)
-	http.HandleFunc("/api/preview", previewHandler)
 
 	port := getEnv("WEBUI_PORT", "8080")
 	log.Printf("🌐 Newslettar v%s starting on http://0.0.0.0:%s", version, port)
@@ -1052,14 +1059,14 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                     <h3>📝 Template Options</h3>
                     <div class="form-group">
                         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                            <input type="checkbox" id="show_posters" checked onchange="updatePreview()">
+                            <input type="checkbox" id="show_posters" checked>
                             <span>Show poster images in email</span>
                         </label>
                         <p style="color: #b0b0b0; font-size: 0.9em; margin-top: 5px; margin-left: 30px;">Display movie and series posters in the newsletter</p>
                     </div>
                     <div class="form-group">
                         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                            <input type="checkbox" id="show_downloaded" checked onchange="updatePreview()">
+                            <input type="checkbox" id="show_downloaded" checked>
                             <span>Include "Downloaded Last Week" section</span>
                         </label>
                         <p style="color: #b0b0b0; font-size: 0.9em; margin-top: 5px; margin-left: 30px;">Show content that was downloaded in the past week</p>
@@ -1067,14 +1074,6 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                     <button type="button" class="btn btn-primary" onclick="saveTemplateSettings()">💾 Save Template Settings</button>
                 </div>
 
-                <div class="form-section">
-                    <h3>👁️ Live Preview</h3>
-                    <p style="color: #b0b0b0; margin-bottom: 15px;">Preview how your newsletter will look with current settings</p>
-                    <button type="button" class="btn btn-secondary" onclick="loadPreview()" style="margin-bottom: 15px;">🔄 Refresh Preview</button>
-                    <div style="background: #2d2d2d; border: 1px solid #4a4a4a; border-radius: 8px; padding: 20px; max-height: 600px; overflow-y: auto;">
-                        <iframe id="emailPreview" style="width: 100%; min-height: 500px; border: none; background: white;" srcdoc="<p style='text-align: center; padding: 50px; color: #999;'>Click 'Refresh Preview' to load preview</p>"></iframe>
-                    </div>
-                </div>
             </div>
             <div id="actions" class="section">
                 <div id="actionStatus" class="status-box"></div>
@@ -1427,32 +1426,9 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
                     .then(r => r.json())
                     .then(() => {
                         showStatus('templateStatus', '✓ Template settings saved successfully!', 'success');
-                        loadPreview();
                     })
                     .catch(() => showStatus('templateStatus', '✗ Error saving template settings', 'error'));
             });
-        }
-        
-        function updatePreview() {
-            loadPreview();
-        }
-        
-        function loadPreview() {
-            const showPosters = document.getElementById('show_posters').checked;
-            const showDownloaded = document.getElementById('show_downloaded').checked;
-            const iframe = document.getElementById('emailPreview');
-            
-            showStatus('templateStatus', '🔄 Loading preview...', 'info');
-            
-            fetch('/api/preview?show_posters=' + showPosters + '&show_downloaded=' + showDownloaded)
-                .then(r => r.text())
-                .then(html => {
-                    iframe.srcdoc = html;
-                    showStatus('templateStatus', '✓ Preview loaded', 'success');
-                })
-                .catch(() => {
-                    showStatus('templateStatus', '✗ Error loading preview. Make sure Sonarr/Radarr are configured.', 'error');
-                });
         }
     </script>
 </body>
@@ -1863,51 +1839,6 @@ func versionHandler(w http.ResponseWriter, r *http.Request) {
 		"released":         remoteVersion.Released,
 		"changelog":        remoteVersion.Changelog,
 	})
-}
-
-func previewHandler(w http.ResponseWriter, r *http.Request) {
-	// Get template settings from query params
-	showPosters := r.URL.Query().Get("show_posters") == "true"
-	showDownloaded := r.URL.Query().Get("show_downloaded") == "true"
-	
-	cfg := loadConfig()
-	
-	now := time.Now()
-	weekStart := now.AddDate(0, 0, -7)
-	weekEnd := now
-	
-	// Fetch data for preview
-	downloadedEpisodes, _ := fetchSonarrHistory(cfg, weekStart)
-	upcomingEpisodes, _ := fetchSonarrCalendar(cfg, weekEnd, weekEnd.AddDate(0, 0, 7))
-	downloadedMovies, _ := fetchRadarrHistory(cfg, weekStart)
-	upcomingMovies, _ := fetchRadarrCalendar(cfg, weekEnd, weekEnd.AddDate(0, 0, 7))
-	
-	// Sort chronologically
-	sort.Slice(upcomingMovies, func(i, j int) bool {
-		return upcomingMovies[i].ReleaseDate < upcomingMovies[j].ReleaseDate
-	})
-	sort.Slice(downloadedMovies, func(i, j int) bool {
-		return downloadedMovies[i].ReleaseDate < downloadedMovies[j].ReleaseDate
-	})
-	
-	data := NewsletterData{
-		WeekStart:              weekStart.Format("January 2, 2006"),
-		WeekEnd:                weekEnd.Format("January 2, 2006"),
-		UpcomingSeriesGroups:   groupEpisodesBySeries(upcomingEpisodes),
-		UpcomingMovies:         upcomingMovies,
-		DownloadedSeriesGroups: groupEpisodesBySeries(downloadedEpisodes),
-		DownloadedMovies:       downloadedMovies,
-	}
-	
-	// Generate HTML with template options
-	html, err := generateNewsletterHTMLWithOptions(data, showPosters, showDownloaded)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, html)
 }
 
 func updateHandler(w http.ResponseWriter, r *http.Request) {

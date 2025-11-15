@@ -1,11 +1,10 @@
 {
-  "version": "1.0.16",
-  "released": "2025-11-14",
+  "version": "1.0.17",
+  "released": "2025-01-27",
   "changelog": [
-    "CRITICAL FIX: 'Send Newsletter Now' button works again!",
-    "Fixed: Manual sends now load .env file correctly",
-    "Fixed: Sonarr/Radarr URLs no longer empty when using Send Now button",
-    "Manual send now properly passes all environment variables",
-    "All v1.0.15 features included (Email Template tab with preview)"
+    "Fixed: 'Send Newsletter Now' button now skips lock file check - manual sends always work",
+    "Fixed: 'Show posters' and 'Show downloaded section' checkboxes now work in actual emails",
+    "Removed: Live preview section completely removed for cleaner UI",
+    "Improved: Email generation now respects template settings from checkboxes"
   ]
 }

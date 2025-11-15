@@ -1,19 +1,7 @@
 {
-  "version": "1.0.21",
+  "version": "1.0.22",
   "released": "2025-01-27",
   "changelog": [
-    "✨ NEW: Quality profile toggle - show/hide quality for each release",
-    "🎨 IMPROVED: Fixed episode title alignment issue",
-    "🎨 IMPROVED: Changed email title to 'Your Weekly Newslettar'",
-    "✨ NEW: Email preview modal (no sending required)",
-    "✨ NEW: Enhanced timezone display with current time and offset",
-    "✨ NEW: Real-time form validation with visual feedback",
-    "✨ NEW: Loading states for all async operations",
-    "✨ NEW: API retry logic with exponential backoff (3 attempts)",
-    "📱 IMPROVED: Fully responsive mobile design",
-    "♿ IMPROVED: Full accessibility support (ARIA, keyboard nav)",
-    "🎨 IMPROVED: Reorganized UI (actions moved to template tab)",
-    "🔧 IMPROVED: All API calls now use context for better control",
-    "🔧 IMPROVED: Better error handling and recovery"
+    "Revert back"
   ]
 }

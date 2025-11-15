@@ -37,6 +37,7 @@ echo ""
 
 INSTALL_DIR="/opt/newslettar"
 REPO_URL="https://raw.githubusercontent.com/agencefanfare/lerefuge/main/newslettar"
+GITHUB_REPO="https://github.com/agencefanfare/lerefuge"
 
 echo -e "${YELLOW}[1/8] Updating system packages...${NC}"
 apt-get update -qq

@@ -172,9 +172,11 @@ func main() {
 	// Load config once at startup
 	cachedConfig = loadConfig()
 
-	// Precompile email template once
+	// Precompile email template with custom functions
 	var err error
-	emailTemplate, err = template.ParseFS(templateFS, "templates/email.html")
+	emailTemplate, err = template.New("email.html").Funcs(template.FuncMap{
+		"formatDateWithDay": formatDateWithDay,
+	}).ParseFS(templateFS, "templates/email.html")
 	if err != nil {
 		log.Fatalf("❌ Failed to parse email template: %v", err)
 	}

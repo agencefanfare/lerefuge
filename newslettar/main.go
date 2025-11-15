@@ -90,7 +90,7 @@ type WebConfig struct {
 	ShowDownloaded string `json:"show_downloaded"`
 }
 
-const version = "1.0.17"
+const version = "1.0.18"
 
 func main() {
 	webMode := flag.Bool("web", false, "Run in web UI mode")

@@ -1,10 +1,10 @@
 {
-  "version": "1.0.17",
+  "version": "1.0.18",
   "released": "2025-01-27",
   "changelog": [
-    "Fixed: 'Send Newsletter Now' button now skips lock file check - manual sends always work",
-    "Fixed: 'Show posters' and 'Show downloaded section' checkboxes now work in actual emails",
-    "Removed: Live preview section completely removed for cleaner UI",
-    "Improved: Email generation now respects template settings from checkboxes"
+    "Redesigned: Email Template tab with modern toggle switches",
+    "Improved: Cleaner, more responsive layout for template settings",
+    "Enhanced: Auto-save functionality when toggles are changed",
+    "Better UX: Visual toggle switches replace checkboxes for better clarity"
   ]
 }

@@ -85,6 +85,38 @@ type Movie struct {
 	TmdbID      int
 }
 
+// For Sonarr calendar response (nested series data)
+type CalendarEpisode struct {
+    SeasonNumber  int    `json:"seasonNumber"`
+    EpisodeNumber int    `json:"episodeNumber"`
+    Title         string `json:"title"`
+    AirDate       string `json:"airDate"`
+    Series        struct {
+        Title  string `json:"title"`
+        TvdbId int    `json:"tvdbId"`
+        ImdbId string `json:"imdbId"`
+        Images []struct {
+            CoverType string `json:"coverType"`
+            Url       string `json:"url"`       // Local URL if available
+            RemoteUrl string `json:"remoteUrl"` // Fallback remote URL
+        } `json:"images"`
+    } `json:"series"`
+}
+
+// For Radarr calendar response (direct fields + images array)
+type CalendarMovie struct {
+    Title           string `json:"title"`
+    Year            int    `json:"year"`
+    PhysicalRelease string `json:"physicalRelease"` // Assuming you want physical release; adjust if needed (e.g., to "digitalRelease" or "inCinemas")
+    ImdbId          string `json:"imdbId"`
+    TmdbId          int    `json:"tmdbId"`
+    Images          []struct {
+        CoverType string `json:"coverType"`
+        Url       string `json:"url"`       // Local URL if available
+        RemoteUrl string `json:"remoteUrl"` // Fallback remote URL
+    } `json:"images"`
+}
+
 type SeriesGroup struct {
 	SeriesTitle string
 	PosterURL   string
@@ -495,76 +527,67 @@ func fetchSonarrHistory(cfg *Config, since time.Time) ([]Episode, error) {
 }
 
 func fetchSonarrCalendar(cfg *Config, start, end time.Time) ([]Episode, error) {
-	if cfg.SonarrURL == "" || cfg.SonarrAPIKey == "" {
-		return nil, fmt.Errorf("Sonarr not configured")
-	}
+    url := fmt.Sprintf("%s/api/v3/calendar?unmonitored=true&includeSeries=true&includeEpisodeImages=true&start=%s&end=%s",
+        cfg.SonarrURL, start.Format("2006-01-02"), end.Format("2006-01-02"))
 
-	url := fmt.Sprintf("%s/api/v3/calendar?start=%s&end=%s",
-		cfg.SonarrURL,
-		start.Format("2006-01-02"),
-		end.Format("2006-01-02"))
+    req, err := http.NewRequest("GET", url, nil)
+    if err != nil {
+        return nil, err
+    }
+    req.Header.Set("X-Api-Key", cfg.SonarrAPIKey)
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("X-Api-Key", cfg.SonarrAPIKey)
+    resp, err := httpClient.Do(req)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
 
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+    if resp.StatusCode != http.StatusOK {
+        return nil, fmt.Errorf("API request failed with status %d", resp.StatusCode)
+    }
 
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
+    // Stream-decode JSON to save memory
+    var calendar []CalendarEpisode
+    decoder := json.NewDecoder(resp.Body)
+    if err := decoder.Decode(&calendar); err != nil {
+        return nil, err
+    }
 
-	var calendarData []struct {
-		SeriesTitle string `json:"seriesTitle"`
-		Series      struct {
-			TvdbID int    `json:"tvdbId"`
-			ImdbID string `json:"imdbId"`
-			Images []struct {
-				CoverType string `json:"coverType"`
-				RemoteURL string `json:"remoteUrl"`
-			} `json:"images"`
-		} `json:"series"`
-		SeasonNumber  int    `json:"seasonNumber"`
-		EpisodeNumber int    `json:"episodeNumber"`
-		Title         string `json:"title"`
-		AirDate       string `json:"airDate"`
-		HasFile       bool   `json:"hasFile"`
-	}
+    // Map to Episode struct
+    var episodes []Episode
+    for _, entry := range calendar {
+        posterURL := ""
+        for _, img := range entry.Series.Images {
+            if img.CoverType == "poster" {
+                if img.Url != "" {
+                    posterURL = img.Url
+                } else if img.RemoteUrl != "" {
+                    posterURL = img.RemoteUrl
+                }
+                break
+            }
+        }
 
-	if err := json.NewDecoder(resp.Body).Decode(&calendarData); err != nil {
-		return nil, err
-	}
+        ep := Episode{
+            SeriesTitle: entry.Series.Title,
+            SeasonNum:   entry.SeasonNumber,
+            EpisodeNum:  entry.EpisodeNumber,
+            Title:       entry.Title,
+            AirDate:     entry.AirDate,
+            PosterURL:   posterURL,
+            IMDBID:      entry.Series.ImdbId,
+            TvdbID:      entry.Series.TvdbId,
+        }
 
-	episodes := []Episode{}
-	for _, ep := range calendarData {
-		posterURL := ""
-		for _, img := range ep.Series.Images {
-			if img.CoverType == "poster" {
-				posterURL = img.RemoteURL
-				break
-			}
-		}
+        if ep.AirDate != "" {
+            airDate, _ := time.Parse("2006-01-02", ep.AirDate)
+            ep.AirDate = airDate.Format("2006-01-02")
+        }
 
-		episodes = append(episodes, Episode{
-			SeriesTitle: ep.SeriesTitle,
-			SeasonNum:   ep.SeasonNumber,
-			EpisodeNum:  ep.EpisodeNumber,
-			Title:       ep.Title,
-			AirDate:     ep.AirDate,
-			Downloaded:  ep.HasFile,
-			PosterURL:   posterURL,
-			IMDBID:      ep.Series.ImdbID,
-			TvdbID:      ep.Series.TvdbID,
-		})
-	}
+        episodes = append(episodes, ep)
+    }
 
-	return episodes, nil
+    return episodes, nil
 }
 
 func fetchRadarrHistory(cfg *Config, since time.Time) ([]Movie, error) {
@@ -647,70 +670,65 @@ func fetchRadarrHistory(cfg *Config, since time.Time) ([]Movie, error) {
 }
 
 func fetchRadarrCalendar(cfg *Config, start, end time.Time) ([]Movie, error) {
-	if cfg.RadarrURL == "" || cfg.RadarrAPIKey == "" {
-		return nil, fmt.Errorf("Radarr not configured")
-	}
+    url := fmt.Sprintf("%s/api/v3/calendar?unmonitored=true&includeMovie=true&start=%s&end=%s",
+        cfg.RadarrURL, start.Format("2006-01-02"), end.Format("2006-01-02"))
 
-	url := fmt.Sprintf("%s/api/v3/calendar?start=%s&end=%s",
-		cfg.RadarrURL,
-		start.Format("2006-01-02"),
-		end.Format("2006-01-02"))
+    req, err := http.NewRequest("GET", url, nil)
+    if err != nil {
+        return nil, err
+    }
+    req.Header.Set("X-Api-Key", cfg.RadarrAPIKey)
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("X-Api-Key", cfg.RadarrAPIKey)
+    resp, err := httpClient.Do(req)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
 
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+    if resp.StatusCode != http.StatusOK {
+        return nil, fmt.Errorf("API request failed with status %d", resp.StatusCode)
+    }
 
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
+    // Stream-decode JSON to save memory
+    var calendar []CalendarMovie
+    decoder := json.NewDecoder(resp.Body)
+    if err := decoder.Decode(&calendar); err != nil {
+        return nil, err
+    }
 
-	var calendarData []struct {
-		Title     string `json:"title"`
-		Year      int    `json:"year"`
-		TmdbID    int    `json:"tmdbId"`
-		ImdbID    string `json:"imdbId"`
-		InCinemas string `json:"inCinemas"`
-		HasFile   bool   `json:"hasFile"`
-		Images    []struct {
-			CoverType string `json:"coverType"`
-			RemoteURL string `json:"remoteUrl"`
-		} `json:"images"`
-	}
+    // Map to Movie struct
+    var movies []Movie
+    for _, entry := range calendar {
+        posterURL := ""
+        for _, img := range entry.Images {
+            if img.CoverType == "poster" {
+                if img.Url != "" {
+                    posterURL = img.Url
+                } else if img.RemoteUrl != "" {
+                    posterURL = img.RemoteUrl
+                }
+                break
+            }
+        }
 
-	if err := json.NewDecoder(resp.Body).Decode(&calendarData); err != nil {
-		return nil, err
-	}
+        mv := Movie{
+            Title:       entry.Title,
+            Year:        entry.Year,
+            ReleaseDate: entry.PhysicalRelease, // If you prefer digital/inCinemas, change to entry.DigitalRelease or entry.InCinemas (and update json tag)
+            PosterURL:   posterURL,
+            IMDBID:      entry.ImdbId,
+            TmdbID:      entry.TmdbId,
+        }
 
-	movies := []Movie{}
-	for _, movie := range calendarData {
-		posterURL := ""
-		for _, img := range movie.Images {
-			if img.CoverType == "poster" {
-				posterURL = img.RemoteURL
-				break
-			}
-		}
+        if mv.ReleaseDate != "" {
+            releaseDate, _ := time.Parse("2006-01-02", mv.ReleaseDate)
+            mv.ReleaseDate = releaseDate.Format("2006-01-02")
+        }
 
-		movies = append(movies, Movie{
-			Title:       movie.Title,
-			Year:        movie.Year,
-			ReleaseDate: movie.InCinemas,
-			Downloaded:  movie.HasFile,
-			PosterURL:   posterURL,
-			IMDBID:      movie.ImdbID,
-			TmdbID:      movie.TmdbID,
-		})
-	}
+        movies = append(movies, mv)
+    }
 
-	return movies, nil
+    return movies, nil
 }
 
 // Group episodes by series

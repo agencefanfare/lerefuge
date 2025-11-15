@@ -1540,29 +1540,25 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
             const resp = await fetch('/api/version');
             const data = await resp.json();
             
-            let html = `
-                <div style="background: #252f3f; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
-                    <p><strong>Current Version:</strong> ${data.current_version}</p>
-                    <p><strong>Latest Version:</strong> ${data.latest_version}</p>
-            `;
+            let html = '<div style="background: #252f3f; padding: 20px; border-radius: 10px; margin-bottom: 20px;">';
+            html += '<p><strong>Current Version:</strong> ' + data.current_version + '</p>';
+            html += '<p><strong>Latest Version:</strong> ' + data.latest_version + '</p>';
 
             if (data.update_available) {
-                html += `
-                    <p style="color: #38ef7d; margin-top: 15px;"><strong>✨ Update Available!</strong></p>
-                    <h4 style="margin-top: 15px;">What's New:</h4>
-                    <ul style="margin-left: 20px; margin-top: 10px;">
-                `;
+                html += '<p style="color: #38ef7d; margin-top: 15px;"><strong>Update Available!</strong></p>';
+                html += '<h4 style="margin-top: 15px;">What\'s New:</h4>';
+                html += '<ul style="margin-left: 20px; margin-top: 10px;">';
                 data.changelog.forEach(item => {
-                    html += `<li style="margin: 5px 0;">${item}</li>`;
+                    html += '<li style="margin: 5px 0;">' + item + '</li>';
                 });
-                html += `</ul>`;
+                html += '</ul>';
                 document.getElementById('update-btn').style.display = 'inline-block';
             } else {
-                html += `<p style="color: #8899aa; margin-top: 15px;">✅ You're running the latest version!</p>`;
+                html += '<p style="color: #8899aa; margin-top: 15px;">You are running the latest version!</p>';
                 document.getElementById('update-btn').style.display = 'none';
             }
 
-            html += `</div>`;
+            html += '</div>';
             document.getElementById('version-info').innerHTML = html;
         }
 

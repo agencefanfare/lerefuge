@@ -734,7 +734,20 @@ func groupEpisodesBySeries(episodes []Episode) []SeriesGroup {
 			}
 			seriesMap[ep.SeriesTitle] = group
 		}
-		group.Episodes = append(group.Episodes, ep)
+		
+		// Check for duplicate episodes (same season and episode number)
+		isDuplicate := false
+		for _, existingEp := range group.Episodes {
+			if existingEp.SeasonNum == ep.SeasonNum && existingEp.EpisodeNum == ep.EpisodeNum {
+				isDuplicate = true
+				break
+			}
+		}
+		
+		// Only add if not a duplicate
+		if !isDuplicate {
+			group.Episodes = append(group.Episodes, ep)
+		}
 	}
 
 	groups := make([]SeriesGroup, 0, len(seriesMap))

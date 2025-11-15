@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"embed"
@@ -924,20 +925,17 @@ func withGzip(handler http.HandlerFunc) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Encoding", "gzip")
-		gz := newGzipResponseWriter(w)
+		gz := gzip.NewWriter(w)
 		defer gz.Close()
 
-		handler(gz, r)
+		gzw := &gzipResponseWriter{Writer: gz, ResponseWriter: w}
+		handler(gzw, r)
 	}
 }
 
 type gzipResponseWriter struct {
 	io.Writer
 	http.ResponseWriter
-}
-
-func newGzipResponseWriter(w http.ResponseWriter) *gzipResponseWriter {
-	return &gzipResponseWriter{Writer: w, ResponseWriter: w}
 }
 
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {

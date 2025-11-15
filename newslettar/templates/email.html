@@ -21,7 +21,7 @@
         .episode-list { padding: 10px 15px; }
         .episode-item { padding: 10px; margin: 5px 0; background-color: #1a2332; border-left: 3px solid #667eea; border-radius: 4px; }
         .episode-number { font-weight: 600; color: #667eea; display: inline-block; min-width: 70px; }
-        .episode-title { color: #e8e8e8; }
+        .episode-title { color: #e8e8e8; display: inline; margin-left: 0; padding-left: 0; }
         .episode-date { color: #8899aa; font-size: 0.9em; display: block; margin-top: 3px; margin-left: 70px; }
         .movie-item { display: flex; padding: 15px; margin: 12px 0; background-color: #252f3f; border-left: 3px solid #38ef7d; border-radius: 8px; align-items: flex-start; }
         .movie-poster { width: 80px; height: 120px; object-fit: cover; border-radius: 6px; margin-right: 15px; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
@@ -37,11 +37,13 @@
         .count-badge { background-color: #667eea; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.85em; margin-left: 10px; font-weight: normal; }
         .downloaded-section { margin-top: 50px; padding-top: 30px; border-top: 2px dashed #2a3444; }
         .downloaded-section h2 { color: #38ef7d; border-left-color: #38ef7d; }
+            .episode-quality { color: #667eea; font-size: 0.85em; font-weight: 500; }
+        .movie-quality { color: #38ef7d; font-size: 0.9em; font-weight: 500; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📺 Your Weekly Newsletter</h1>
+        <h1>📺 Your Weekly Newslettar</h1>
         <div class="date-range">Week of {{.WeekStart}} - {{.WeekEnd}}</div>
         
         <div class="section">
@@ -70,8 +72,7 @@
                     <div class="episode-list">
                         {{range .Episodes}}
                         <div class="episode-item">
-                            <span class="episode-number">S{{printf "%02d" .SeasonNum}}E{{printf "%02d" .EpisodeNum}}</span>
-                            <span class="episode-title">{{if .Title}}{{.Title}}{{else}}TBA{{end}}</span>
+                            <span class="episode-number">S{{printf "%02d" .SeasonNum}}E{{printf "%02d" .EpisodeNum}}</span><span class="episode-title">{{if .Title}} {{.Title}}{{else}} TBA{{end}}</span>{{if $.ShowQuality}}{{if .Quality}}<span class="episode-quality"> • {{.Quality}}</span>{{end}}{{end}}
                             {{if .AirDate}}<span class="episode-date">{{formatDateWithDay .AirDate}}</span>{{end}}
                         </div>
                         {{end}}
@@ -101,7 +102,7 @@
                                 {{.Title}}
                             {{end}}
                         </div>
-                        <div class="movie-year">({{.Year}}){{if .ReleaseDate}} • {{formatDateWithDay .ReleaseDate}}{{end}}</div>
+                        <div class="movie-year">({{.Year}}){{if .ReleaseDate}} • {{formatDateWithDay .ReleaseDate}}{{end}}{{if $.ShowQuality}}{{if .Quality}} • <span class="movie-quality">{{.Quality}}</span>{{end}}{{end}}</div>
                     </div>
                 </div>
                 {{end}}

@@ -1,7 +1,10 @@
 {
-  "version": "1.0.20",
+  "version": "1.0.21",
   "released": "2025-01-27",
   "changelog": [
+    "✨ NEW: Quality profile toggle - show/hide quality for each release",
+    "🎨 IMPROVED: Fixed episode title alignment issue",
+    "🎨 IMPROVED: Changed email title to 'Your Weekly Newslettar'",
     "✨ NEW: Email preview modal (no sending required)",
     "✨ NEW: Enhanced timezone display with current time and offset",
     "✨ NEW: Real-time form validation with visual feedback",

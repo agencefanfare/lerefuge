@@ -413,7 +413,7 @@ func fetchSonarrHistory(cfg *Config, since time.Time) ([]Episode, error) {
 		return nil, fmt.Errorf("Sonarr not configured")
 	}
 
-	url := fmt.Sprintf("%s/api/v3/history?pageSize=100&sortKey=date&sortDirection=descending&eventType=downloadFolderImported", cfg.SonarrURL)
+	url := fmt.Sprintf("%s/api/v3/history?pageSize=1000&sortKey=date&sortDirection=descending&includeEpisode=true&includeSeries=true", cfg.SonarrURL)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -427,14 +427,17 @@ func fetchSonarrHistory(cfg *Config, since time.Time) ([]Episode, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Stream JSON decoding (faster, less memory)
 	var result struct {
 		Records []struct {
-			SeriesTitle string `json:"seriesTitle"`
-			Series      struct {
+			Date      time.Time `json:"date"`
+			EventType string    `json:"eventType"`
+			Series    struct {
+				Title  string `json:"title"`
 				TvdbID int    `json:"tvdbId"`
 				ImdbID string `json:"imdbId"`
 				Images []struct {
@@ -448,7 +451,6 @@ func fetchSonarrHistory(cfg *Config, since time.Time) ([]Episode, error) {
 				Title         string `json:"title"`
 				AirDate       string `json:"airDate"`
 			} `json:"episode"`
-			Date string `json:"date"`
 		} `json:"records"`
 	}
 
@@ -458,8 +460,13 @@ func fetchSonarrHistory(cfg *Config, since time.Time) ([]Episode, error) {
 
 	episodes := []Episode{}
 	for _, record := range result.Records {
-		downloadDate, _ := time.Parse(time.RFC3339, record.Date)
-		if downloadDate.Before(since) {
+		// Only include download events
+		if record.EventType != "downloadFolderImported" && record.EventType != "downloadImported" {
+			continue
+		}
+		
+		// Filter by date
+		if record.Date.Before(since) {
 			continue
 		}
 
@@ -472,7 +479,7 @@ func fetchSonarrHistory(cfg *Config, since time.Time) ([]Episode, error) {
 		}
 
 		episodes = append(episodes, Episode{
-			SeriesTitle: record.SeriesTitle,
+			SeriesTitle: record.Series.Title,
 			SeasonNum:   record.Episode.SeasonNumber,
 			EpisodeNum:  record.Episode.EpisodeNumber,
 			Title:       record.Episode.Title,
@@ -565,7 +572,7 @@ func fetchRadarrHistory(cfg *Config, since time.Time) ([]Movie, error) {
 		return nil, fmt.Errorf("Radarr not configured")
 	}
 
-	url := fmt.Sprintf("%s/api/v3/history?pageSize=100&sortKey=date&sortDirection=descending&eventType=downloadFolderImported", cfg.RadarrURL)
+	url := fmt.Sprintf("%s/api/v3/history?pageSize=1000&sortKey=date&sortDirection=descending&includeMovie=true", cfg.RadarrURL)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -579,23 +586,25 @@ func fetchRadarrHistory(cfg *Config, since time.Time) ([]Movie, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
 	var result struct {
 		Records []struct {
-			Movie struct {
-				Title       string `json:"title"`
-				Year        int    `json:"year"`
-				TmdbID      int    `json:"tmdbId"`
-				ImdbID      string `json:"imdbId"`
-				InCinemas   string `json:"inCinemas"`
-				Images      []struct {
+			Date      time.Time `json:"date"`
+			EventType string    `json:"eventType"`
+			Movie     struct {
+				Title     string `json:"title"`
+				Year      int    `json:"year"`
+				TmdbID    int    `json:"tmdbId"`
+				ImdbID    string `json:"imdbId"`
+				InCinemas string `json:"inCinemas"`
+				Images    []struct {
 					CoverType string `json:"coverType"`
 					RemoteURL string `json:"remoteUrl"`
 				} `json:"images"`
 			} `json:"movie"`
-			Date string `json:"date"`
 		} `json:"records"`
 	}
 
@@ -605,8 +614,13 @@ func fetchRadarrHistory(cfg *Config, since time.Time) ([]Movie, error) {
 
 	movies := []Movie{}
 	for _, record := range result.Records {
-		downloadDate, _ := time.Parse(time.RFC3339, record.Date)
-		if downloadDate.Before(since) {
+		// Only include download events
+		if record.EventType != "downloadFolderImported" && record.EventType != "downloadImported" {
+			continue
+		}
+		
+		// Filter by date
+		if record.Date.Before(since) {
 			continue
 		}
 

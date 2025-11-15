@@ -976,6 +976,22 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
         .spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: white; animation: spin 1s ease-in-out infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .test-connection-btn { margin-top: 10px; }
+        .toggle-container { display: flex; align-items: center; justify-content: space-between; padding: 20px; background: #2d2d2d; border-radius: 8px; margin-bottom: 15px; border: 1px solid #4a4a4a; transition: all 0.3s; }
+        .toggle-container:hover { border-color: #5a5a5a; background: #333333; }
+        .toggle-info { flex: 1; }
+        .toggle-title { font-size: 1.1em; font-weight: 600; color: #e0e0e0; margin-bottom: 5px; }
+        .toggle-description { font-size: 0.9em; color: #b0b0b0; }
+        .toggle-switch { position: relative; display: inline-block; width: 60px; height: 32px; flex-shrink: 0; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #4a4a4a; transition: 0.3s; border-radius: 32px; }
+        .toggle-slider:before { position: absolute; content: ""; height: 24px; width: 24px; left: 4px; bottom: 4px; background-color: white; transition: 0.3s; border-radius: 50%; }
+        .toggle-switch input:checked + .toggle-slider { background-color: #4a6a4a; }
+        .toggle-switch input:checked + .toggle-slider:before { transform: translateX(28px); }
+        .toggle-switch input:focus + .toggle-slider { box-shadow: 0 0 1px #4a6a4a; }
+        .template-grid { display: grid; grid-template-columns: 1fr; gap: 15px; max-width: 600px; }
+        @media (min-width: 768px) {
+            .template-grid { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
@@ -1053,25 +1069,30 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
             </div>
             <div id="template" class="section">
                 <div id="templateStatus" class="status-box"></div>
-                <h2 style="margin-bottom: 20px; color: #e0e0e0;">Email Template Settings</h2>
+                <h2 style="margin-bottom: 30px; color: #e0e0e0;">Email Template Settings</h2>
                 
-                <div class="form-section">
-                    <h3>📝 Template Options</h3>
-                    <div class="form-group">
-                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                            <input type="checkbox" id="show_posters" checked>
-                            <span>Show poster images in email</span>
+                <div class="template-grid">
+                    <div class="toggle-container">
+                        <div class="toggle-info">
+                            <div class="toggle-title">Show Poster Images</div>
+                            <div class="toggle-description">Display movie and series posters in the newsletter</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="show_posters" checked onchange="saveTemplateSettings()">
+                            <span class="toggle-slider"></span>
                         </label>
-                        <p style="color: #b0b0b0; font-size: 0.9em; margin-top: 5px; margin-left: 30px;">Display movie and series posters in the newsletter</p>
                     </div>
-                    <div class="form-group">
-                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                            <input type="checkbox" id="show_downloaded" checked>
-                            <span>Include "Downloaded Last Week" section</span>
+                    
+                    <div class="toggle-container">
+                        <div class="toggle-info">
+                            <div class="toggle-title">Include Downloaded Section</div>
+                            <div class="toggle-description">Show content that was downloaded in the past week</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="show_downloaded" checked onchange="saveTemplateSettings()">
+                            <span class="toggle-slider"></span>
                         </label>
-                        <p style="color: #b0b0b0; font-size: 0.9em; margin-top: 5px; margin-left: 30px;">Show content that was downloaded in the past week</p>
                     </div>
-                    <button type="button" class="btn btn-primary" onclick="saveTemplateSettings()">💾 Save Template Settings</button>
                 </div>
 
             </div>

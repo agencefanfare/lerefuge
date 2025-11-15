@@ -1,20 +1,16 @@
 {
-  "version": "1.0.19",
+  "version": "1.0.20",
   "released": "2025-01-27",
   "changelog": [
-    "🚀 MAJOR: Reduced memory usage by ~70% (65-80MB → 10-15MB idle)",
-    "⚡ MAJOR: 3-5x faster API calls with HTTP client reuse",
-    "⚡ MAJOR: Parallel API fetching (400-700ms → ~100ms)",
-    "🌍 NEW: Timezone support - schedule in your local time",
-    "⏰ NEW: Internal cron scheduler (no systemd dependency)",
-    "🗜️ NEW: Gzip compression for web UI (faster loading)",
-    "📝 NEW: Ring buffer logs (500 lines in memory, no disk growth)",
-    "🔧 IMPROVED: Streaming JSON decoding (faster, less memory)",
-    "🔧 IMPROVED: Config caching (no repeated file reads)",
-    "🔧 IMPROVED: Precompiled email templates",
-    "🔧 IMPROVED: Binary size optimization with build flags",
-    "🔧 IMPROVED: Graceful shutdown handling",
-    "✨ IMPROVED: Cross-platform compatible",
-    "✨ IMPROVED: Cleaner code structure with embedded templates"
+    "✨ NEW: Email preview modal (no sending required)",
+    "✨ NEW: Enhanced timezone display with current time and offset",
+    "✨ NEW: Real-time form validation with visual feedback",
+    "✨ NEW: Loading states for all async operations",
+    "✨ NEW: API retry logic with exponential backoff (3 attempts)",
+    "📱 IMPROVED: Fully responsive mobile design",
+    "♿ IMPROVED: Full accessibility support (ARIA, keyboard nav)",
+    "🎨 IMPROVED: Reorganized UI (actions moved to template tab)",
+    "🔧 IMPROVED: All API calls now use context for better control",
+    "🔧 IMPROVED: Better error handling and recovery"
   ]
 }

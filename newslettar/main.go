@@ -27,10 +27,11 @@ import (
 )
 
 // Embed static files to reduce memory and simplify deployment
+//
 //go:embed templates/*.html
 var templateFS embed.FS
 
-const version = "1.0.19"
+const version = "1.0.20"
 
 // Global HTTP client (reused for all requests - 3-5x faster)
 var httpClient = &http.Client{
@@ -87,34 +88,34 @@ type Movie struct {
 
 // For Sonarr calendar response (nested series data)
 type CalendarEpisode struct {
-    SeasonNumber  int    `json:"seasonNumber"`
-    EpisodeNumber int    `json:"episodeNumber"`
-    Title         string `json:"title"`
-    AirDate       string `json:"airDate"`
-    Series        struct {
-        Title  string `json:"title"`
-        TvdbId int    `json:"tvdbId"`
-        ImdbId string `json:"imdbId"`
-        Images []struct {
-            CoverType string `json:"coverType"`
-            Url       string `json:"url"`       // Local URL if available
-            RemoteUrl string `json:"remoteUrl"` // Fallback remote URL
-        } `json:"images"`
-    } `json:"series"`
+	SeasonNumber  int    `json:"seasonNumber"`
+	EpisodeNumber int    `json:"episodeNumber"`
+	Title         string `json:"title"`
+	AirDate       string `json:"airDate"`
+	Series        struct {
+		Title  string `json:"title"`
+		TvdbId int    `json:"tvdbId"`
+		ImdbId string `json:"imdbId"`
+		Images []struct {
+			CoverType string `json:"coverType"`
+			Url       string `json:"url"`       // Local URL if available
+			RemoteUrl string `json:"remoteUrl"` // Fallback remote URL
+		} `json:"images"`
+	} `json:"series"`
 }
 
 // For Radarr calendar response (direct fields + images array)
 type CalendarMovie struct {
-    Title           string `json:"title"`
-    Year            int    `json:"year"`
-    PhysicalRelease string `json:"physicalRelease"` // Assuming you want physical release; adjust if needed (e.g., to "digitalRelease" or "inCinemas")
-    ImdbId          string `json:"imdbId"`
-    TmdbId          int    `json:"tmdbId"`
-    Images          []struct {
-        CoverType string `json:"coverType"`
-        Url       string `json:"url"`       // Local URL if available
-        RemoteUrl string `json:"remoteUrl"` // Fallback remote URL
-    } `json:"images"`
+	Title           string `json:"title"`
+	Year            int    `json:"year"`
+	PhysicalRelease string `json:"physicalRelease"` // Assuming you want physical release; adjust if needed (e.g., to "digitalRelease" or "inCinemas")
+	ImdbId          string `json:"imdbId"`
+	TmdbId          int    `json:"tmdbId"`
+	Images          []struct {
+		CoverType string `json:"coverType"`
+		Url       string `json:"url"`       // Local URL if available
+		RemoteUrl string `json:"remoteUrl"` // Fallback remote URL
+	} `json:"images"`
 }
 
 type SeriesGroup struct {
@@ -234,7 +235,11 @@ func runNewsletter() {
 
 	log.Printf("📅 Week range: %s to %s", weekStart.Format("2006-01-02"), weekEnd.Format("2006-01-02"))
 
-	// Parallel API calls (3-4x faster!) 
+	// Use a cancellable context for all fetches
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Parallel API calls (3-4x faster!)
 	var wg sync.WaitGroup
 	var downloadedEpisodes, upcomingEpisodes []Episode
 	var downloadedMovies, upcomingMovies []Movie
@@ -248,7 +253,7 @@ func runNewsletter() {
 	go func() {
 		defer wg.Done()
 		log.Println("📺 Fetching Sonarr history...")
-		downloadedEpisodes, errSonarrHistory = fetchSonarrHistory(cfg, weekStart)
+		downloadedEpisodes, errSonarrHistory = fetchSonarrHistoryWithRetry(ctx, cfg, weekStart, 3)
 		if errSonarrHistory != nil {
 			log.Printf("⚠️  Sonarr history error: %v", errSonarrHistory)
 		} else {
@@ -259,7 +264,7 @@ func runNewsletter() {
 	go func() {
 		defer wg.Done()
 		log.Println("📺 Fetching Sonarr calendar...")
-		upcomingEpisodes, errSonarrCalendar = fetchSonarrCalendar(cfg, weekEnd, weekEnd.AddDate(0, 0, 7))
+		upcomingEpisodes, errSonarrCalendar = fetchSonarrCalendarWithRetry(ctx, cfg, weekEnd, weekEnd.AddDate(0, 0, 7), 3)
 		if errSonarrCalendar != nil {
 			log.Printf("⚠️  Sonarr calendar error: %v", errSonarrCalendar)
 		} else {
@@ -270,7 +275,7 @@ func runNewsletter() {
 	go func() {
 		defer wg.Done()
 		log.Println("🎬 Fetching Radarr history...")
-		downloadedMovies, errRadarrHistory = fetchRadarrHistory(cfg, weekStart)
+		downloadedMovies, errRadarrHistory = fetchRadarrHistoryWithRetry(ctx, cfg, weekStart, 3)
 		if errRadarrHistory != nil {
 			log.Printf("⚠️  Radarr history error: %v", errRadarrHistory)
 		} else {
@@ -281,7 +286,7 @@ func runNewsletter() {
 	go func() {
 		defer wg.Done()
 		log.Println("🎬 Fetching Radarr calendar...")
-		upcomingMovies, errRadarrCalendar = fetchRadarrCalendar(cfg, weekEnd, weekEnd.AddDate(0, 0, 7))
+		upcomingMovies, errRadarrCalendar = fetchRadarrCalendarWithRetry(ctx, cfg, weekEnd, weekEnd.AddDate(0, 0, 7), 3)
 		if errRadarrCalendar != nil {
 			log.Printf("⚠️  Radarr calendar error: %v", errRadarrCalendar)
 		} else {
@@ -340,6 +345,75 @@ func runNewsletter() {
 	downloadedMovies = nil
 	upcomingMovies = nil
 	data = NewsletterData{}
+}
+
+// Retry wrappers for API calls
+func fetchSonarrHistoryWithRetry(ctx context.Context, cfg *Config, since time.Time, maxRetries int) ([]Episode, error) {
+	var episodes []Episode
+	var err error
+	for i := 0; i < maxRetries; i++ {
+		episodes, err = fetchSonarrHistory(ctx, cfg, since)
+		if err == nil {
+			return episodes, nil
+		}
+		if i < maxRetries-1 {
+			wait := time.Duration(i+1) * time.Second
+			log.Printf("⏳ Retrying Sonarr history in %v... (attempt %d/%d)", wait, i+2, maxRetries)
+			time.Sleep(wait)
+		}
+	}
+	return episodes, err
+}
+
+func fetchSonarrCalendarWithRetry(ctx context.Context, cfg *Config, start, end time.Time, maxRetries int) ([]Episode, error) {
+	var episodes []Episode
+	var err error
+	for i := 0; i < maxRetries; i++ {
+		episodes, err = fetchSonarrCalendar(ctx, cfg, start, end)
+		if err == nil {
+			return episodes, nil
+		}
+		if i < maxRetries-1 {
+			wait := time.Duration(i+1) * time.Second
+			log.Printf("⏳ Retrying Sonarr calendar in %v... (attempt %d/%d)", wait, i+2, maxRetries)
+			time.Sleep(wait)
+		}
+	}
+	return episodes, err
+}
+
+func fetchRadarrHistoryWithRetry(ctx context.Context, cfg *Config, since time.Time, maxRetries int) ([]Movie, error) {
+	var movies []Movie
+	var err error
+	for i := 0; i < maxRetries; i++ {
+		movies, err = fetchRadarrHistory(ctx, cfg, since)
+		if err == nil {
+			return movies, nil
+		}
+		if i < maxRetries-1 {
+			wait := time.Duration(i+1) * time.Second
+			log.Printf("⏳ Retrying Radarr history in %v... (attempt %d/%d)", wait, i+2, maxRetries)
+			time.Sleep(wait)
+		}
+	}
+	return movies, err
+}
+
+func fetchRadarrCalendarWithRetry(ctx context.Context, cfg *Config, start, end time.Time, maxRetries int) ([]Movie, error) {
+	var movies []Movie
+	var err error
+	for i := 0; i < maxRetries; i++ {
+		movies, err = fetchRadarrCalendar(ctx, cfg, start, end)
+		if err == nil {
+			return movies, nil
+		}
+		if i < maxRetries-1 {
+			wait := time.Duration(i+1) * time.Second
+			log.Printf("⏳ Retrying Radarr calendar in %v... (attempt %d/%d)", wait, i+2, maxRetries)
+			time.Sleep(wait)
+		}
+	}
+	return movies, err
 }
 
 // Get timezone location
@@ -439,14 +513,14 @@ func getEnvFromFile(envMap map[string]string, key, defaultValue string) string {
 	return defaultValue
 }
 
-// Fetch functions using shared HTTP client (streaming JSON decode)
-func fetchSonarrHistory(cfg *Config, since time.Time) ([]Episode, error) {
+// Updated fetch functions to accept context and use RequestWithContext
+func fetchSonarrHistory(ctx context.Context, cfg *Config, since time.Time) ([]Episode, error) {
 	if cfg.SonarrURL == "" || cfg.SonarrAPIKey == "" {
 		return nil, fmt.Errorf("Sonarr not configured")
 	}
 
 	url := fmt.Sprintf("%s/api/v3/history?pageSize=1000&sortKey=date&sortDirection=descending&includeEpisode=true&includeSeries=true", cfg.SonarrURL)
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -496,7 +570,7 @@ func fetchSonarrHistory(cfg *Config, since time.Time) ([]Episode, error) {
 		if record.EventType != "downloadFolderImported" && record.EventType != "downloadImported" {
 			continue
 		}
-		
+
 		// Filter by date
 		if record.Date.Before(since) {
 			continue
@@ -526,77 +600,77 @@ func fetchSonarrHistory(cfg *Config, since time.Time) ([]Episode, error) {
 	return episodes, nil
 }
 
-func fetchSonarrCalendar(cfg *Config, start, end time.Time) ([]Episode, error) {
-    url := fmt.Sprintf("%s/api/v3/calendar?unmonitored=true&includeSeries=true&includeEpisodeImages=true&start=%s&end=%s",
-        cfg.SonarrURL, start.Format("2006-01-02"), end.Format("2006-01-02"))
+func fetchSonarrCalendar(ctx context.Context, cfg *Config, start, end time.Time) ([]Episode, error) {
+	url := fmt.Sprintf("%s/api/v3/calendar?unmonitored=true&includeSeries=true&includeEpisodeImages=true&start=%s&end=%s",
+		cfg.SonarrURL, start.Format("2006-01-02"), end.Format("2006-01-02"))
 
-    req, err := http.NewRequest("GET", url, nil)
-    if err != nil {
-        return nil, err
-    }
-    req.Header.Set("X-Api-Key", cfg.SonarrAPIKey)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Api-Key", cfg.SonarrAPIKey)
 
-    resp, err := httpClient.Do(req)
-    if err != nil {
-        return nil, err
-    }
-    defer resp.Body.Close()
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
-    if resp.StatusCode != http.StatusOK {
-        return nil, fmt.Errorf("API request failed with status %d", resp.StatusCode)
-    }
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API request failed with status %d", resp.StatusCode)
+	}
 
-    // Stream-decode JSON to save memory
-    var calendar []CalendarEpisode
-    decoder := json.NewDecoder(resp.Body)
-    if err := decoder.Decode(&calendar); err != nil {
-        return nil, err
-    }
+	// Stream-decode JSON to save memory
+	var calendar []CalendarEpisode
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(&calendar); err != nil {
+		return nil, err
+	}
 
-    // Map to Episode struct
-    var episodes []Episode
-    for _, entry := range calendar {
-        posterURL := ""
-        for _, img := range entry.Series.Images {
-            if img.CoverType == "poster" {
-                if img.Url != "" {
-                    posterURL = img.Url
-                } else if img.RemoteUrl != "" {
-                    posterURL = img.RemoteUrl
-                }
-                break
-            }
-        }
+	// Map to Episode struct
+	var episodes []Episode
+	for _, entry := range calendar {
+		posterURL := ""
+		for _, img := range entry.Series.Images {
+			if img.CoverType == "poster" {
+				if img.Url != "" {
+					posterURL = img.Url
+				} else if img.RemoteUrl != "" {
+					posterURL = img.RemoteUrl
+				}
+				break
+			}
+		}
 
-        ep := Episode{
-            SeriesTitle: entry.Series.Title,
-            SeasonNum:   entry.SeasonNumber,
-            EpisodeNum:  entry.EpisodeNumber,
-            Title:       entry.Title,
-            AirDate:     entry.AirDate,
-            PosterURL:   posterURL,
-            IMDBID:      entry.Series.ImdbId,
-            TvdbID:      entry.Series.TvdbId,
-        }
+		ep := Episode{
+			SeriesTitle: entry.Series.Title,
+			SeasonNum:   entry.SeasonNumber,
+			EpisodeNum:  entry.EpisodeNumber,
+			Title:       entry.Title,
+			AirDate:     entry.AirDate,
+			PosterURL:   posterURL,
+			IMDBID:      entry.Series.ImdbId,
+			TvdbID:      entry.Series.TvdbId,
+		}
 
-        if ep.AirDate != "" {
-            airDate, _ := time.Parse("2006-01-02", ep.AirDate)
-            ep.AirDate = airDate.Format("2006-01-02")
-        }
+		if ep.AirDate != "" {
+			airDate, _ := time.Parse("2006-01-02", ep.AirDate)
+			ep.AirDate = airDate.Format("2006-01-02")
+		}
 
-        episodes = append(episodes, ep)
-    }
+		episodes = append(episodes, ep)
+	}
 
-    return episodes, nil
+	return episodes, nil
 }
 
-func fetchRadarrHistory(cfg *Config, since time.Time) ([]Movie, error) {
+func fetchRadarrHistory(ctx context.Context, cfg *Config, since time.Time) ([]Movie, error) {
 	if cfg.RadarrURL == "" || cfg.RadarrAPIKey == "" {
 		return nil, fmt.Errorf("Radarr not configured")
 	}
 
 	url := fmt.Sprintf("%s/api/v3/history?pageSize=1000&sortKey=date&sortDirection=descending&includeMovie=true", cfg.RadarrURL)
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -641,7 +715,7 @@ func fetchRadarrHistory(cfg *Config, since time.Time) ([]Movie, error) {
 		if record.EventType != "downloadFolderImported" && record.EventType != "downloadImported" {
 			continue
 		}
-		
+
 		// Filter by date
 		if record.Date.Before(since) {
 			continue
@@ -669,66 +743,66 @@ func fetchRadarrHistory(cfg *Config, since time.Time) ([]Movie, error) {
 	return movies, nil
 }
 
-func fetchRadarrCalendar(cfg *Config, start, end time.Time) ([]Movie, error) {
-    url := fmt.Sprintf("%s/api/v3/calendar?unmonitored=true&includeMovie=true&start=%s&end=%s",
-        cfg.RadarrURL, start.Format("2006-01-02"), end.Format("2006-01-02"))
+func fetchRadarrCalendar(ctx context.Context, cfg *Config, start, end time.Time) ([]Movie, error) {
+	url := fmt.Sprintf("%s/api/v3/calendar?unmonitored=true&includeMovie=true&start=%s&end=%s",
+		cfg.RadarrURL, start.Format("2006-01-02"), end.Format("2006-01-02"))
 
-    req, err := http.NewRequest("GET", url, nil)
-    if err != nil {
-        return nil, err
-    }
-    req.Header.Set("X-Api-Key", cfg.RadarrAPIKey)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Api-Key", cfg.RadarrAPIKey)
 
-    resp, err := httpClient.Do(req)
-    if err != nil {
-        return nil, err
-    }
-    defer resp.Body.Close()
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
-    if resp.StatusCode != http.StatusOK {
-        return nil, fmt.Errorf("API request failed with status %d", resp.StatusCode)
-    }
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API request failed with status %d", resp.StatusCode)
+	}
 
-    // Stream-decode JSON to save memory
-    var calendar []CalendarMovie
-    decoder := json.NewDecoder(resp.Body)
-    if err := decoder.Decode(&calendar); err != nil {
-        return nil, err
-    }
+	// Stream-decode JSON to save memory
+	var calendar []CalendarMovie
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(&calendar); err != nil {
+		return nil, err
+	}
 
-    // Map to Movie struct
-    var movies []Movie
-    for _, entry := range calendar {
-        posterURL := ""
-        for _, img := range entry.Images {
-            if img.CoverType == "poster" {
-                if img.Url != "" {
-                    posterURL = img.Url
-                } else if img.RemoteUrl != "" {
-                    posterURL = img.RemoteUrl
-                }
-                break
-            }
-        }
+	// Map to Movie struct
+	var movies []Movie
+	for _, entry := range calendar {
+		posterURL := ""
+		for _, img := range entry.Images {
+			if img.CoverType == "poster" {
+				if img.Url != "" {
+					posterURL = img.Url
+				} else if img.RemoteUrl != "" {
+					posterURL = img.RemoteUrl
+				}
+				break
+			}
+		}
 
-        mv := Movie{
-            Title:       entry.Title,
-            Year:        entry.Year,
-            ReleaseDate: entry.PhysicalRelease, // If you prefer digital/inCinemas, change to entry.DigitalRelease or entry.InCinemas (and update json tag)
-            PosterURL:   posterURL,
-            IMDBID:      entry.ImdbId,
-            TmdbID:      entry.TmdbId,
-        }
+		mv := Movie{
+			Title:       entry.Title,
+			Year:        entry.Year,
+			ReleaseDate: entry.PhysicalRelease,
+			PosterURL:   posterURL,
+			IMDBID:      entry.ImdbId,
+			TmdbID:      entry.TmdbId,
+		}
 
-        if mv.ReleaseDate != "" {
-            releaseDate, _ := time.Parse("2006-01-02", mv.ReleaseDate)
-            mv.ReleaseDate = releaseDate.Format("2006-01-02")
-        }
+		if mv.ReleaseDate != "" {
+			releaseDate, _ := time.Parse("2006-01-02", mv.ReleaseDate)
+			mv.ReleaseDate = releaseDate.Format("2006-01-02")
+		}
 
-        movies = append(movies, mv)
-    }
+		movies = append(movies, mv)
+	}
 
-    return movies, nil
+	return movies, nil
 }
 
 // Group episodes by series
@@ -752,7 +826,7 @@ func groupEpisodesBySeries(episodes []Episode) []SeriesGroup {
 			}
 			seriesMap[ep.SeriesTitle] = group
 		}
-		
+
 		// Check for duplicate episodes (same season and episode number)
 		isDuplicate := false
 		for _, existingEp := range group.Episodes {
@@ -761,7 +835,7 @@ func groupEpisodesBySeries(episodes []Episode) []SeriesGroup {
 				break
 			}
 		}
-		
+
 		// Only add if not a duplicate
 		if !isDuplicate {
 			group.Episodes = append(group.Episodes, ep)
@@ -865,6 +939,8 @@ func startWebServer() {
 	http.HandleFunc("/api/logs", logsHandler)
 	http.HandleFunc("/api/version", versionHandler)
 	http.HandleFunc("/api/update", updateHandler)
+	http.HandleFunc("/api/preview", previewHandler)
+	http.HandleFunc("/api/timezone-info", timezoneInfoHandler)
 
 	// Graceful shutdown
 	server := &http.Server{
@@ -990,6 +1066,7 @@ func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 }
 
 // Handlers
+
 func uiHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := getConfig()
 	loc := getTimezone(cfg.Timezone)
@@ -1010,10 +1087,22 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
             line-height: 1.6;
         }
         .container {
-            max-width: 1000px;
+            max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
         }
+        
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .container { padding: 10px; }
+            .header h1 { font-size: 1.8em; }
+            .tabs { flex-wrap: wrap; }
+            .tab { flex: 1 1 45%; font-size: 12px; padding: 10px; }
+            .form-group { margin-bottom: 15px; }
+            .action-buttons { flex-direction: column; }
+            .action-buttons .btn { margin-bottom: 10px; }
+        }
+        
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             padding: 30px;
@@ -1050,6 +1139,7 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
             transition: all 0.3s;
         }
         .tab:hover { background: #252f3f; color: #fff; }
+        .tab:focus { outline: 2px solid #667eea; outline-offset: 2px; }
         .tab.active {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: #fff;
@@ -1085,6 +1175,19 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
             outline: none;
             border-color: #667eea;
         }
+        .form-group input.error, .form-group select.error {
+            border-color: #eb3349;
+        }
+        .form-group input.success, .form-group select.success {
+            border-color: #38ef7d;
+        }
+        .error-message {
+            color: #eb3349;
+            font-size: 0.85em;
+            margin-top: 5px;
+            display: none;
+        }
+        .error-message.show { display: block; }
         .btn {
             padding: 12px 24px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -1095,9 +1198,16 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
             font-size: 14px;
             font-weight: 600;
             transition: transform 0.2s, opacity 0.3s;
+            position: relative;
         }
         .btn:hover { transform: translateY(-2px); opacity: 0.9; }
         .btn:active { transform: translateY(0); }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .btn:focus { outline: 2px solid #667eea; outline-offset: 2px; }
         .btn-secondary {
             background: #2a3444;
         }
@@ -1106,6 +1216,24 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
         }
         .btn-danger {
             background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+        }
+        .btn.loading::after {
+            content: "";
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            top: 50%;
+            left: 50%;
+            margin-left: -8px;
+            margin-top: -8px;
+            border: 2px solid #ffffff40;
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+        .btn.loading span { opacity: 0; }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
         .notification {
             position: fixed;
@@ -1200,8 +1328,15 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
             border-radius: 8px;
             margin-bottom: 12px;
         }
-        .timezone-select {
-            max-width: 300px;
+        .timezone-info {
+            background: #252f3f;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
+        .timezone-info strong {
+            color: #667eea;
         }
         .info-banner {
             background: #252f3f;
@@ -1217,17 +1352,104 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
         .info-banner strong {
             color: #e8e8e8;
         }
-        .spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 3px solid rgba(255,255,255,.3);
-            border-radius: 50%;
-            border-top-color: #fff;
-            animation: spin 1s ease-in-out infinite;
+        
+        /* Preview Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            animation: fadeIn 0.3s;
         }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+        .modal.show { display: flex; align-items: center; justify-content: center; }
+        .modal-content {
+            background: #1a2332;
+            width: 90%;
+            max-width: 900px;
+            max-height: 90vh;
+            border-radius: 12px;
+            overflow: hidden;
+            animation: slideUp 0.3s;
+        }
+        .modal-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-header h2 {
+            margin: 0;
+            color: white;
+        }
+        .modal-close {
+            background: transparent;
+            border: none;
+            color: white;
+            font-size: 28px;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            line-height: 1;
+        }
+        .modal-close:hover { opacity: 0.7; }
+        .modal-close:focus { outline: 2px solid white; outline-offset: 2px; }
+        .modal-body {
+            padding: 20px;
+            max-height: calc(90vh - 140px);
+            overflow-y: auto;
+        }
+        .modal-body iframe {
+            width: 100%;
+            height: 600px;
+            border: 2px solid #2a3444;
+            border-radius: 8px;
+            background: white;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes slideUp {
+            from { transform: translateY(50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .action-buttons .btn {
+            flex: 1;
+        }
+        
+        /* Loading overlay */
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 1500;
+            align-items: center;
+            justify-content: center;
+        }
+        .loading-overlay.show { display: flex; }
+        .loading-spinner {
+            width: 60px;
+            height: 60px;
+            border: 5px solid rgba(255,255,255,0.3);
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
         }
     </style>
 </head>
@@ -1235,18 +1457,17 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
     <div class="container">
         <div class="header">
             <h1>📺 Newslettar</h1>
-            <p class="version">Version ` + version + ` • Internal Scheduler • Timezone-Aware</p>
+            <p class="version">Version ` + version + ` • Enhanced UI • Timezone-Aware</p>
         </div>
 
-        <div class="tabs">
-            <button class="tab active" onclick="showTab('config')">⚙️ Configuration</button>
-            <button class="tab" onclick="showTab('actions')">🎬 Actions</button>
-            <button class="tab" onclick="showTab('template')">📝 Email Template</button>
-            <button class="tab" onclick="showTab('logs')">📋 Logs</button>
-            <button class="tab" onclick="showTab('update')">🔄 Update</button>
+        <div class="tabs" role="tablist">
+            <button class="tab active" role="tab" aria-selected="true" aria-controls="config-tab" onclick="showTab('config')">⚙️ Configuration</button>
+            <button class="tab" role="tab" aria-selected="false" aria-controls="template-tab" onclick="showTab('template')">📝 Email Template</button>
+            <button class="tab" role="tab" aria-selected="false" aria-controls="logs-tab" onclick="showTab('logs')">📋 Logs</button>
+            <button class="tab" role="tab" aria-selected="false" aria-controls="update-tab" onclick="showTab('update')">🔄 Update</button>
         </div>
 
-        <div id="config-tab" class="tab-content active">
+        <div id="config-tab" class="tab-content active" role="tabpanel">
             <div class="info-banner">
                 <p><strong>⏰ Next Scheduled Send:</strong> ` + nextRun + `</p>
                 <p><strong>🌍 Timezone:</strong> <span id="current-timezone">` + cfg.Timezone + `</span></p>
@@ -1258,29 +1479,30 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
             <form id="config-form">
                 <h3 style="margin-bottom: 15px; color: #667eea;">Schedule Settings</h3>
                 
-                <div class="form-group timezone-select">
-                    <label>Timezone</label>
-                    <select name="timezone" id="timezone">
-                        <option value="UTC">UTC</option>
-                        <option value="America/New_York">Eastern (US)</option>
-                        <option value="America/Chicago">Central (US)</option>
-                        <option value="America/Denver">Mountain (US)</option>
-                        <option value="America/Los_Angeles">Pacific (US)</option>
-                        <option value="America/Toronto">Toronto</option>
-                        <option value="America/Vancouver">Vancouver</option>
-                        <option value="America/Montreal">Montreal</option>
-                        <option value="Europe/London">London</option>
-                        <option value="Europe/Paris">Paris</option>
-                        <option value="Europe/Berlin">Berlin</option>
-                        <option value="Asia/Tokyo">Tokyo</option>
-                        <option value="Asia/Shanghai">Shanghai</option>
-                        <option value="Australia/Sydney">Sydney</option>
+                <div class="form-group">
+                    <label for="timezone">Timezone</label>
+                    <select name="timezone" id="timezone" aria-label="Select timezone">
+                        <option value="UTC">UTC (GMT+0)</option>
+                        <option value="America/New_York">Eastern Time (GMT-5/-4)</option>
+                        <option value="America/Chicago">Central Time (GMT-6/-5)</option>
+                        <option value="America/Denver">Mountain Time (GMT-7/-6)</option>
+                        <option value="America/Los_Angeles">Pacific Time (GMT-8/-7)</option>
+                        <option value="America/Toronto">Toronto (GMT-5/-4)</option>
+                        <option value="America/Vancouver">Vancouver (GMT-8/-7)</option>
+                        <option value="America/Montreal">Montreal (GMT-5/-4)</option>
+                        <option value="Europe/London">London (GMT+0/+1)</option>
+                        <option value="Europe/Paris">Paris (GMT+1/+2)</option>
+                        <option value="Europe/Berlin">Berlin (GMT+1/+2)</option>
+                        <option value="Asia/Tokyo">Tokyo (GMT+9)</option>
+                        <option value="Asia/Shanghai">Shanghai (GMT+8)</option>
+                        <option value="Australia/Sydney">Sydney (GMT+10/+11)</option>
                     </select>
+                    <div class="timezone-info" id="timezone-info"></div>
                 </div>
 
                 <div class="form-group">
-                    <label>Day of Week</label>
-                    <select name="schedule_day">
+                    <label for="schedule_day">Day of Week</label>
+                    <select name="schedule_day" id="schedule_day" aria-label="Select day of week">
                         <option value="Sun">Sunday</option>
                         <option value="Mon">Monday</option>
                         <option value="Tue">Tuesday</option>
@@ -1292,94 +1514,89 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
                 </div>
 
                 <div class="form-group">
-                    <label>Time (24-hour format, HH:MM)</label>
-                    <input type="time" name="schedule_time" required>
+                    <label for="schedule_time">Time (24-hour format, HH:MM)</label>
+                    <input type="time" name="schedule_time" id="schedule_time" required aria-label="Select time">
+                    <div class="error-message" id="time-error">Please enter a valid time (HH:MM)</div>
                 </div>
 
                 <hr style="margin: 30px 0; border: none; border-top: 2px solid #2a3444;">
 
                 <h3 style="margin-bottom: 15px; color: #667eea;">Sonarr Settings</h3>
                 <div class="form-group">
-                    <label>Sonarr URL</label>
-                    <input type="text" name="sonarr_url" placeholder="http://localhost:8989">
+                    <label for="sonarr_url">Sonarr URL</label>
+                    <input type="url" name="sonarr_url" id="sonarr_url" placeholder="http://localhost:8989" aria-label="Sonarr URL">
+                    <div class="error-message" id="sonarr-url-error">Please enter a valid URL</div>
                 </div>
                 <div class="form-group">
-                    <label>Sonarr API Key</label>
-                    <input type="text" name="sonarr_api_key" placeholder="Your Sonarr API key">
+                    <label for="sonarr_api_key">Sonarr API Key</label>
+                    <input type="text" name="sonarr_api_key" id="sonarr_api_key" placeholder="Your Sonarr API key" aria-label="Sonarr API Key">
                 </div>
-                <button type="button" class="btn btn-secondary" onclick="testConnection('sonarr')">Test Sonarr</button>
+                <button type="button" class="btn btn-secondary" onclick="testConnection('sonarr')" aria-label="Test Sonarr connection">
+                    <span>Test Sonarr</span>
+                </button>
 
                 <hr style="margin: 30px 0; border: none; border-top: 2px solid #2a3444;">
 
                 <h3 style="margin-bottom: 15px; color: #667eea;">Radarr Settings</h3>
                 <div class="form-group">
-                    <label>Radarr URL</label>
-                    <input type="text" name="radarr_url" placeholder="http://localhost:7878">
+                    <label for="radarr_url">Radarr URL</label>
+                    <input type="url" name="radarr_url" id="radarr_url" placeholder="http://localhost:7878" aria-label="Radarr URL">
+                    <div class="error-message" id="radarr-url-error">Please enter a valid URL</div>
                 </div>
                 <div class="form-group">
-                    <label>Radarr API Key</label>
-                    <input type="text" name="radarr_api_key" placeholder="Your Radarr API key">
+                    <label for="radarr_api_key">Radarr API Key</label>
+                    <input type="text" name="radarr_api_key" id="radarr_api_key" placeholder="Your Radarr API key" aria-label="Radarr API Key">
                 </div>
-                <button type="button" class="btn btn-secondary" onclick="testConnection('radarr')">Test Radarr</button>
+                <button type="button" class="btn btn-secondary" onclick="testConnection('radarr')" aria-label="Test Radarr connection">
+                    <span>Test Radarr</span>
+                </button>
 
                 <hr style="margin: 30px 0; border: none; border-top: 2px solid #2a3444;">
 
                 <h3 style="margin-bottom: 15px; color: #667eea;">Email Settings</h3>
                 <div class="form-group">
-                    <label>SMTP Server</label>
-                    <input type="text" name="mailgun_smtp" placeholder="smtp.mailgun.org">
+                    <label for="mailgun_smtp">SMTP Server</label>
+                    <input type="text" name="mailgun_smtp" id="mailgun_smtp" placeholder="smtp.mailgun.org" aria-label="SMTP Server">
                 </div>
                 <div class="form-group">
-                    <label>SMTP Port</label>
-                    <input type="text" name="mailgun_port" placeholder="587">
+                    <label for="mailgun_port">SMTP Port</label>
+                    <input type="number" name="mailgun_port" id="mailgun_port" placeholder="587" aria-label="SMTP Port">
                 </div>
                 <div class="form-group">
-                    <label>SMTP Username</label>
-                    <input type="text" name="mailgun_user" placeholder="postmaster@yourdomain.com">
+                    <label for="mailgun_user">SMTP Username</label>
+                    <input type="text" name="mailgun_user" id="mailgun_user" placeholder="postmaster@yourdomain.com" aria-label="SMTP Username">
                 </div>
                 <div class="form-group">
-                    <label>SMTP Password</label>
-                    <input type="password" name="mailgun_pass" placeholder="Your SMTP password">
+                    <label for="mailgun_pass">SMTP Password</label>
+                    <input type="password" name="mailgun_pass" id="mailgun_pass" placeholder="Your SMTP password" aria-label="SMTP Password">
                 </div>
                 <div class="form-group">
-                    <label>From Name</label>
-                    <input type="text" name="from_name" placeholder="Newslettar">
+                    <label for="from_name">From Name</label>
+                    <input type="text" name="from_name" id="from_name" placeholder="Newslettar" aria-label="From Name">
                 </div>
                 <div class="form-group">
-                    <label>From Email</label>
-                    <input type="email" name="from_email" placeholder="newsletter@yourdomain.com">
+                    <label for="from_email">From Email</label>
+                    <input type="email" name="from_email" id="from_email" placeholder="newsletter@yourdomain.com" aria-label="From Email">
+                    <div class="error-message" id="from-email-error">Please enter a valid email address</div>
                 </div>
                 <div class="form-group">
-                    <label>To Emails (comma-separated)</label>
-                    <input type="text" name="to_emails" placeholder="user@example.com, user2@example.com">
+                    <label for="to_emails">To Emails (comma-separated)</label>
+                    <input type="text" name="to_emails" id="to_emails" placeholder="user@example.com, user2@example.com" aria-label="To Emails">
+                    <div class="error-message" id="to-emails-error">Please enter valid email addresses</div>
                 </div>
-                <button type="button" class="btn btn-secondary" onclick="testConnection('email')">Test Email Auth</button>
+                <button type="button" class="btn btn-secondary" onclick="testConnection('email')" aria-label="Test email authentication">
+                    <span>Test Email Auth</span>
+                </button>
 
                 <hr style="margin: 30px 0; border: none; border-top: 2px solid #2a3444;">
 
-                <button type="submit" class="btn">💾 Save Configuration</button>
+                <button type="submit" class="btn" aria-label="Save configuration">
+                    <span>💾 Save Configuration</span>
+                </button>
             </form>
         </div>
 
-        <div id="actions-tab" class="tab-content">
-            <div class="schedule-info">
-                <h3>📅 Scheduled Newsletter</h3>
-                <p>Next scheduled send: <strong>` + nextRun + `</strong></p>
-                <p style="margin-top: 10px; font-size: 0.9em; opacity: 0.8;">
-                    The newsletter runs automatically based on your schedule settings.
-                </p>
-            </div>
-
-            <h3 style="margin-bottom: 15px;">Manual Actions</h3>
-            <button class="btn btn-success" onclick="sendNow()" style="margin-right: 10px;">
-                📧 Send Newsletter Now
-            </button>
-            <p style="margin-top: 15px; color: #8899aa; font-size: 0.9em;">
-                This will generate and send the newsletter immediately, regardless of schedule.
-            </p>
-        </div>
-
-        <div id="template-tab" class="tab-content">
+        <div id="template-tab" class="tab-content" role="tabpanel">
             <h3 style="margin-bottom: 20px;">Email Template Options</h3>
             
             <div class="template-option">
@@ -1390,7 +1607,7 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
                     </p>
                 </div>
                 <label class="toggle-switch">
-                    <input type="checkbox" id="show-posters" onchange="saveTemplateSettings()">
+                    <input type="checkbox" id="show-posters" onchange="saveTemplateSettings()" aria-label="Toggle poster display">
                     <span class="toggle-slider"></span>
                 </label>
             </div>
@@ -1403,7 +1620,7 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
                     </p>
                 </div>
                 <label class="toggle-switch">
-                    <input type="checkbox" id="show-downloaded" onchange="saveTemplateSettings()">
+                    <input type="checkbox" id="show-downloaded" onchange="saveTemplateSettings()" aria-label="Toggle downloaded section">
                     <span class="toggle-slider"></span>
                 </label>
             </div>
@@ -1411,40 +1628,86 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
             <p style="margin-top: 20px; color: #8899aa; font-size: 0.9em;">
                 ℹ️ Changes are saved automatically when you toggle switches.
             </p>
+
+            <hr style="margin: 30px 0; border: none; border-top: 2px solid #2a3444;">
+
+            <h3 style="margin-bottom: 20px;">Actions</h3>
+            
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="previewNewsletter()" aria-label="Preview newsletter">
+                    <span>👁️ Preview Newsletter</span>
+                </button>
+                <button class="btn btn-success" onclick="sendNow()" aria-label="Send newsletter now">
+                    <span>📧 Send Newsletter Now</span>
+                </button>
+            </div>
+            
+            <p style="margin-top: 15px; color: #8899aa; font-size: 0.9em;">
+                Preview generates the email based on current settings without sending. Send Now will generate and send immediately.
+            </p>
         </div>
 
-        <div id="logs-tab" class="tab-content">
+        <div id="logs-tab" class="tab-content" role="tabpanel">
             <h3 style="margin-bottom: 15px;">📋 Newsletter Logs</h3>
-            <button class="btn btn-secondary" onclick="loadLogs()" style="margin-bottom: 15px;">
-                🔄 Refresh Logs
+            <button class="btn btn-secondary" onclick="loadLogs()" style="margin-bottom: 15px;" aria-label="Refresh logs">
+                <span>🔄 Refresh Logs</span>
             </button>
-            <div class="logs-container" id="logs"></div>
+            <div class="logs-container" id="logs" role="log" aria-live="polite"></div>
         </div>
 
-        <div id="update-tab" class="tab-content">
+        <div id="update-tab" class="tab-content" role="tabpanel">
             <h3 style="margin-bottom: 20px;">🔄 Update Newslettar</h3>
             
-            <div id="version-info">
+            <div id="version-info" aria-live="polite">
                 <p>Checking for updates...</p>
             </div>
 
-            <button class="btn" onclick="checkUpdates()" style="margin-right: 10px;">
-                🔍 Check for Updates
+            <button class="btn" onclick="checkUpdates()" style="margin-right: 10px;" aria-label="Check for updates">
+                <span>🔍 Check for Updates</span>
             </button>
-            <button class="btn btn-success" id="update-btn" onclick="performUpdate()" style="display: none;">
-                ⬇️ Update Now
+            <button class="btn btn-success" id="update-btn" onclick="performUpdate()" style="display: none;" aria-label="Update now">
+                <span>⬇️ Update Now</span>
             </button>
         </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div id="preview-modal" class="modal" role="dialog" aria-labelledby="preview-title" aria-modal="true">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="preview-title">Email Preview</h2>
+                <button class="modal-close" onclick="closePreview()" aria-label="Close preview">&times;</button>
+            </div>
+            <div class="modal-body">
+                <iframe id="preview-frame" title="Email preview"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay" role="status" aria-live="polite">
+        <div class="loading-spinner"></div>
     </div>
 
     <script>
         let logsInterval;
 
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closePreview();
+            }
+        });
+
         function showTab(tabName) {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(t => {
+                t.classList.remove('active');
+                t.setAttribute('aria-selected', 'false');
+            });
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
             
             event.target.classList.add('active');
+            event.target.setAttribute('aria-selected', 'true');
             document.getElementById(tabName + '-tab').classList.add('active');
 
             if (tabName === 'logs') {
@@ -1457,47 +1720,166 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
             }
         }
 
+        // Real-time validation
+        function validateURL(input) {
+            const value = input.value.trim();
+            if (!value) return true;
+            
+            try {
+                new URL(value);
+                return true;
+            } catch {
+                return false;
+            }
+        }
+
+        function validateEmail(email) {
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+        }
+
+        function validateEmails(input) {
+            const value = input.value.trim();
+            if (!value) return true;
+            
+            const emails = value.split(',').map(e => e.trim());
+            return emails.every(email => validateEmail(email));
+        }
+
+        // Add validation listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            const sonarrUrl = document.getElementById('sonarr_url');
+            const radarrUrl = document.getElementById('radarr_url');
+            const fromEmail = document.getElementById('from_email');
+            const toEmails = document.getElementById('to_emails');
+
+            sonarrUrl.addEventListener('blur', function() {
+                if (this.value && !validateURL(this)) {
+                    this.classList.add('error');
+                    this.classList.remove('success');
+                    document.getElementById('sonarr-url-error').classList.add('show');
+                } else if (this.value) {
+                    this.classList.remove('error');
+                    this.classList.add('success');
+                    document.getElementById('sonarr-url-error').classList.remove('show');
+                }
+            });
+
+            radarrUrl.addEventListener('blur', function() {
+                if (this.value && !validateURL(this)) {
+                    this.classList.add('error');
+                    this.classList.remove('success');
+                    document.getElementById('radarr-url-error').classList.add('show');
+                } else if (this.value) {
+                    this.classList.remove('error');
+                    this.classList.add('success');
+                    document.getElementById('radarr-url-error').classList.remove('show');
+                }
+            });
+
+            fromEmail.addEventListener('blur', function() {
+                if (this.value && !validateEmail(this.value)) {
+                    this.classList.add('error');
+                    this.classList.remove('success');
+                    document.getElementById('from-email-error').classList.add('show');
+                } else if (this.value) {
+                    this.classList.remove('error');
+                    this.classList.add('success');
+                    document.getElementById('from-email-error').classList.remove('show');
+                }
+            });
+
+            toEmails.addEventListener('blur', function() {
+                if (this.value && !validateEmails(this)) {
+                    this.classList.add('error');
+                    this.classList.remove('success');
+                    document.getElementById('to-emails-error').classList.add('show');
+                } else if (this.value) {
+                    this.classList.remove('error');
+                    this.classList.add('success');
+                    document.getElementById('to-emails-error').classList.remove('show');
+                }
+            });
+
+            // Update timezone info on change
+            document.getElementById('timezone').addEventListener('change', updateTimezoneInfo);
+        });
+
+        async function updateTimezoneInfo() {
+            const tz = document.getElementById('timezone').value;
+            try {
+                const resp = await fetch('/api/timezone-info?tz=' + encodeURIComponent(tz));
+                const data = await resp.json();
+                
+                document.getElementById('timezone-info').innerHTML = 
+                    '<strong>Current time:</strong> ' + data.current_time + 
+                    ' <strong>•</strong> Offset: ' + data.offset;
+            } catch (error) {
+                console.error('Failed to fetch timezone info:', error);
+            }
+        }
+
         async function loadConfig() {
-            const resp = await fetch('/api/config');
-            const data = await resp.json();
-            
-            document.querySelector('[name="sonarr_url"]').value = data.sonarr_url || '';
-            document.querySelector('[name="sonarr_api_key"]').value = data.sonarr_api_key || '';
-            document.querySelector('[name="radarr_url"]').value = data.radarr_url || '';
-            document.querySelector('[name="radarr_api_key"]').value = data.radarr_api_key || '';
-            document.querySelector('[name="mailgun_smtp"]').value = data.mailgun_smtp || 'smtp.mailgun.org';
-            document.querySelector('[name="mailgun_port"]').value = data.mailgun_port || '587';
-            document.querySelector('[name="mailgun_user"]').value = data.mailgun_user || '';
-            document.querySelector('[name="mailgun_pass"]').value = data.mailgun_pass || '';
-            document.querySelector('[name="from_email"]').value = data.from_email || '';
-            document.querySelector('[name="from_name"]').value = data.from_name || 'Newslettar';
-            document.querySelector('[name="to_emails"]').value = data.to_emails || '';
-            document.querySelector('[name="timezone"]').value = data.timezone || 'UTC';
-            document.querySelector('[name="schedule_day"]').value = data.schedule_day || 'Sun';
-            document.querySelector('[name="schedule_time"]').value = data.schedule_time || '09:00';
-            
-            document.getElementById('show-posters').checked = data.show_posters !== 'false';
-            document.getElementById('show-downloaded').checked = data.show_downloaded !== 'false';
-            
-            document.getElementById('current-timezone').textContent = data.timezone || 'UTC';
+            showLoading();
+            try {
+                const resp = await fetch('/api/config');
+                const data = await resp.json();
+                
+                document.querySelector('[name="sonarr_url"]').value = data.sonarr_url || '';
+                document.querySelector('[name="sonarr_api_key"]').value = data.sonarr_api_key || '';
+                document.querySelector('[name="radarr_url"]').value = data.radarr_url || '';
+                document.querySelector('[name="radarr_api_key"]').value = data.radarr_api_key || '';
+                document.querySelector('[name="mailgun_smtp"]').value = data.mailgun_smtp || 'smtp.mailgun.org';
+                document.querySelector('[name="mailgun_port"]').value = data.mailgun_port || '587';
+                document.querySelector('[name="mailgun_user"]').value = data.mailgun_user || '';
+                document.querySelector('[name="mailgun_pass"]').value = data.mailgun_pass || '';
+                document.querySelector('[name="from_email"]').value = data.from_email || '';
+                document.querySelector('[name="from_name"]').value = data.from_name || 'Newslettar';
+                document.querySelector('[name="to_emails"]').value = data.to_emails || '';
+                document.querySelector('[name="timezone"]').value = data.timezone || 'UTC';
+                document.querySelector('[name="schedule_day"]').value = data.schedule_day || 'Sun';
+                document.querySelector('[name="schedule_time"]').value = data.schedule_time || '09:00';
+                
+                document.getElementById('show-posters').checked = data.show_posters !== 'false';
+                document.getElementById('show-downloaded').checked = data.show_downloaded !== 'false';
+                
+                document.getElementById('current-timezone').textContent = data.timezone || 'UTC';
+                
+                await updateTimezoneInfo();
+            } catch (error) {
+                showNotification('Failed to load configuration: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
         }
 
         document.getElementById('config-form').addEventListener('submit', async (e) => {
             e.preventDefault();
+            
             const formData = new FormData(e.target);
             const data = Object.fromEntries(formData);
             
-            const resp = await fetch('/api/config', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
-            });
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+            submitBtn.classList.add('loading');
+            submitBtn.disabled = true;
+            
+            try {
+                const resp = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
 
-            if (resp.ok) {
-                showNotification('Configuration saved successfully!', 'success');
-                setTimeout(() => location.reload(), 2000);
-            } else {
-                showNotification('Failed to save configuration', 'error');
+                if (resp.ok) {
+                    showNotification('Configuration saved successfully!', 'success');
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    showNotification('Failed to save configuration', 'error');
+                }
+            } catch (error) {
+                showNotification('Network error: ' + error.message, 'error');
+            } finally {
+                submitBtn.classList.remove('loading');
+                submitBtn.disabled = false;
             }
         });
 
@@ -1506,13 +1888,11 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
             const formData = new FormData(form);
             const data = Object.fromEntries(formData);
             
-            const button = event.target;
-            const originalText = button.textContent;
-            button.innerHTML = '<span class="spinner"></span> Testing...';
+            const button = event.target.closest('button');
+            button.classList.add('loading');
             button.disabled = true;
 
-            let endpoint;
-            let payload;
+            let endpoint, payload;
 
             if (type === 'sonarr') {
                 endpoint = '/api/test-sonarr';
@@ -1530,99 +1910,175 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
                 };
             }
 
-            const resp = await fetch(endpoint, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(payload)
-            });
+            try {
+                const resp = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
 
-            const result = await resp.json();
-            button.textContent = originalText;
-            button.disabled = false;
+                const result = await resp.json();
+                showNotification(result.message, result.success ? 'success' : 'error');
+            } catch (error) {
+                showNotification('Connection test failed: ' + error.message, 'error');
+            } finally {
+                button.classList.remove('loading');
+                button.disabled = false;
+            }
+        }
 
-            showNotification(result.message, result.success ? 'success' : 'error');
+        async function previewNewsletter() {
+            const button = event.target.closest('button');
+            button.classList.add('loading');
+            button.disabled = true;
+            
+            showLoading();
+
+            try {
+                const resp = await fetch('/api/preview', { method: 'POST' });
+                const data = await resp.json();
+
+                if (data.success) {
+                    const iframe = document.getElementById('preview-frame');
+                    iframe.srcdoc = data.html;
+                    document.getElementById('preview-modal').classList.add('show');
+                } else {
+                    showNotification(data.error || 'Failed to generate preview', 'error');
+                }
+            } catch (error) {
+                showNotification('Preview failed: ' + error.message, 'error');
+            } finally {
+                button.classList.remove('loading');
+                button.disabled = false;
+                hideLoading();
+            }
+        }
+
+        function closePreview() {
+            document.getElementById('preview-modal').classList.remove('show');
         }
 
         async function sendNow() {
             if (!confirm('Send newsletter now?')) return;
             
+            const button = event.target.closest('button');
+            button.classList.add('loading');
+            button.disabled = true;
+            
             showNotification('Sending newsletter...', 'success');
             
-            const resp = await fetch('/api/send', { method: 'POST' });
-            const data = await resp.json();
+            try {
+                const resp = await fetch('/api/send', { method: 'POST' });
+                const data = await resp.json();
 
-            if (data.success) {
-                showNotification('Newsletter sent successfully!', 'success');
-            } else {
-                showNotification('Failed to send newsletter', 'error');
+                if (data.success) {
+                    showNotification('Newsletter sent successfully!', 'success');
+                } else {
+                    showNotification('Failed to send newsletter', 'error');
+                }
+            } catch (error) {
+                showNotification('Send failed: ' + error.message, 'error');
+            } finally {
+                button.classList.remove('loading');
+                button.disabled = false;
             }
         }
 
         async function loadLogs() {
-            const resp = await fetch('/api/logs');
-            const logs = await resp.text();
-            document.getElementById('logs').textContent = logs;
-            document.getElementById('logs').scrollTop = document.getElementById('logs').scrollHeight;
+            try {
+                const resp = await fetch('/api/logs');
+                const logs = await resp.text();
+                document.getElementById('logs').textContent = logs;
+                document.getElementById('logs').scrollTop = document.getElementById('logs').scrollHeight;
+            } catch (error) {
+                console.error('Failed to load logs:', error);
+            }
         }
 
         async function saveTemplateSettings() {
             const showPosters = document.getElementById('show-posters').checked;
             const showDownloaded = document.getElementById('show-downloaded').checked;
 
-            await fetch('/api/config', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    show_posters: showPosters ? 'true' : 'false',
-                    show_downloaded: showDownloaded ? 'true' : 'false'
-                })
-            });
+            try {
+                await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        show_posters: showPosters ? 'true' : 'false',
+                        show_downloaded: showDownloaded ? 'true' : 'false'
+                    })
+                });
 
-            showNotification('Template settings saved', 'success');
+                showNotification('Template settings saved', 'success');
+            } catch (error) {
+                showNotification('Failed to save settings: ' + error.message, 'error');
+            }
         }
 
         async function checkUpdates() {
-            const resp = await fetch('/api/version');
-            const data = await resp.json();
-            
-            let html = '<div style="background: #252f3f; padding: 20px; border-radius: 10px; margin-bottom: 20px;">';
-            html += '<p><strong>Current Version:</strong> ' + data.current_version + '</p>';
-            html += '<p><strong>Latest Version:</strong> ' + data.latest_version + '</p>';
+            const button = event.target;
+            button.classList.add('loading');
+            button.disabled = true;
 
-            if (data.update_available) {
-                html += '<p style="color: #38ef7d; margin-top: 15px;"><strong>Update Available!</strong></p>';
-                html += '<h4 style="margin-top: 15px;">What\'s New:</h4>';
-                html += '<ul style="margin-left: 20px; margin-top: 10px;">';
-                data.changelog.forEach(item => {
-                    html += '<li style="margin: 5px 0;">' + item + '</li>';
-                });
-                html += '</ul>';
-                document.getElementById('update-btn').style.display = 'inline-block';
-            } else {
-                html += '<p style="color: #8899aa; margin-top: 15px;">You are running the latest version!</p>';
-                document.getElementById('update-btn').style.display = 'none';
+            try {
+                const resp = await fetch('/api/version');
+                const data = await resp.json();
+                
+                let html = '<div style="background: #252f3f; padding: 20px; border-radius: 10px; margin-bottom: 20px;">';
+                html += '<p><strong>Current Version:</strong> ' + data.current_version + '</p>';
+                html += '<p><strong>Latest Version:</strong> ' + data.latest_version + '</p>';
+
+                if (data.update_available) {
+                    html += '<p style="color: #38ef7d; margin-top: 15px;"><strong>Update Available!</strong></p>';
+                    html += '<h4 style="margin-top: 15px;">What\'s New:</h4>';
+                    html += '<ul style="margin-left: 20px; margin-top: 10px;">';
+                    data.changelog.forEach(item => {
+                        html += '<li style="margin: 5px 0;">' + item + '</li>';
+                    });
+                    html += '</ul>';
+                    document.getElementById('update-btn').style.display = 'inline-block';
+                } else {
+                    html += '<p style="color: #8899aa; margin-top: 15px;">You are running the latest version!</p>';
+                    document.getElementById('update-btn').style.display = 'none';
+                }
+
+                html += '</div>';
+                document.getElementById('version-info').innerHTML = html;
+            } catch (error) {
+                showNotification('Failed to check updates: ' + error.message, 'error');
+            } finally {
+                button.classList.remove('loading');
+                button.disabled = false;
             }
-
-            html += '</div>';
-            document.getElementById('version-info').innerHTML = html;
         }
 
         async function performUpdate() {
             if (!confirm('Update Newslettar? The page will reload in 20 seconds.')) return;
 
+            const button = document.getElementById('update-btn');
+            button.classList.add('loading');
+            button.disabled = true;
+
             showNotification('Starting update... Page will reload in 20 seconds', 'success');
             
-            await fetch('/api/update', { method: 'POST' });
+            try {
+                await fetch('/api/update', { method: 'POST' });
 
-            setTimeout(() => {
-                location.reload();
-            }, 20000);
+                setTimeout(() => {
+                    location.reload();
+                }, 20000);
+            } catch (error) {
+                showNotification('Update failed: ' + error.message, 'error');
+                button.classList.remove('loading');
+                button.disabled = false;
+            }
         }
 
         function showNotification(message, type) {
             const notification = document.createElement('div');
             notification.className = 'notification ' + type;
             notification.textContent = message;
+            notification.setAttribute('role', 'alert');
             document.body.appendChild(notification);
 
             setTimeout(() => {
@@ -1630,6 +2086,15 @@ func uiHandler(w http.ResponseWriter, r *http.Request) {
             }, 10000);
         }
 
+        function showLoading() {
+            document.getElementById('loading-overlay').classList.add('show');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading-overlay').classList.remove('show');
+        }
+
+        // Load config on page load
         loadConfig();
         checkUpdates();
     </script>
@@ -1680,6 +2145,106 @@ func getNextScheduledRun(day, timeStr string, loc *time.Location) string {
 	}
 
 	return nextRun.Format("Monday, January 2, 2006 at 3:04 PM MST")
+}
+
+func timezoneInfoHandler(w http.ResponseWriter, r *http.Request) {
+	tz := r.URL.Query().Get("tz")
+	if tz == "" {
+		tz = "UTC"
+	}
+
+	loc := getTimezone(tz)
+	now := time.Now().In(loc)
+
+	_, offset := now.Zone()
+	hours := offset / 3600
+	minutes := (offset % 3600) / 60
+
+	offsetStr := fmt.Sprintf("GMT%+d", hours)
+	if minutes != 0 {
+		offsetStr = fmt.Sprintf("GMT%+d:%02d", hours, minutes)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"current_time": now.Format("Monday, January 2, 2006 3:04 PM"),
+		"offset":       offsetStr,
+	})
+}
+
+// Preview handler for UI
+func previewHandler(w http.ResponseWriter, r *http.Request) {
+	cfg := getConfig()
+	loc := getTimezone(cfg.Timezone)
+	now := time.Now().In(loc)
+
+	weekStart := now.AddDate(0, 0, -7)
+	weekEnd := now
+
+	// Parallel API calls with context
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	var downloadedEpisodes, upcomingEpisodes []Episode
+	var downloadedMovies, upcomingMovies []Movie
+
+	wg.Add(4)
+
+	go func() {
+		defer wg.Done()
+		downloadedEpisodes, _ = fetchSonarrHistoryWithRetry(ctx, cfg, weekStart, 2)
+	}()
+
+	go func() {
+		defer wg.Done()
+		upcomingEpisodes, _ = fetchSonarrCalendarWithRetry(ctx, cfg, weekEnd, weekEnd.AddDate(0, 0, 7), 2)
+	}()
+
+	go func() {
+		defer wg.Done()
+		downloadedMovies, _ = fetchRadarrHistoryWithRetry(ctx, cfg, weekStart, 2)
+	}()
+
+	go func() {
+		defer wg.Done()
+		upcomingMovies, _ = fetchRadarrCalendarWithRetry(ctx, cfg, weekEnd, weekEnd.AddDate(0, 0, 7), 2)
+	}()
+
+	wg.Wait()
+
+	// Sort movies chronologically
+	sort.Slice(upcomingMovies, func(i, j int) bool {
+		return upcomingMovies[i].ReleaseDate < upcomingMovies[j].ReleaseDate
+	})
+	sort.Slice(downloadedMovies, func(i, j int) bool {
+		return downloadedMovies[i].ReleaseDate < downloadedMovies[j].ReleaseDate
+	})
+
+	data := NewsletterData{
+		WeekStart:              weekStart.Format("January 2, 2006"),
+		WeekEnd:                weekEnd.Format("January 2, 2006"),
+		UpcomingSeriesGroups:   groupEpisodesBySeries(upcomingEpisodes),
+		UpcomingMovies:         upcomingMovies,
+		DownloadedSeriesGroups: groupEpisodesBySeries(downloadedEpisodes),
+		DownloadedMovies:       downloadedMovies,
+	}
+
+	html, err := generateNewsletterHTML(data, cfg.ShowPosters, cfg.ShowDownloaded)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to generate preview: %v", err),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"html":    html,
+	})
 }
 
 func configHandler(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weekly Newsletter</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background-color: #f5f5f5;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5;">
+        <tr>
+            <td align="center" style="padding: 40px 20px;">
+                <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    <!-- Header -->
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px; text-align: center;">
+                            <h1 style="margin: 0; color: #ffffff; font-size: 32px; font-weight: 700;">📺 Your Weekly Newsletter</h1>
+                            <p style="margin: 10px 0 0 0; color: rgba(255,255,255,0.9); font-size: 16px;">{{.WeekStart}} - {{.WeekEnd}}</p>
+                        </td>
+                    </tr>
+
+                    <!-- Coming This Week -->
+                    {{if or .UpcomingSeriesGroups .UpcomingMovies}}
+                    <tr>
+                        <td style="padding: 40px;">
+                            <h2 style="margin: 0 0 20px 0; color: #333; font-size: 24px; font-weight: 600; border-bottom: 3px solid #667eea; padding-bottom: 10px;">🎬 Coming This Week</h2>
+
+                            <!-- TV Shows -->
+                            {{range .UpcomingSeriesGroups}}
+                            <div style="margin-bottom: 30px; padding: 20px; background-color: #f8f9fa; border-radius: 8px;">
+                                <h3 style="margin: 0 0 15px 0; color: #333; font-size: 20px; font-weight: 600;">
+                                    {{if .IMDBID}}<a href="https://www.imdb.com/title/{{.IMDBID}}" style="color: #667eea; text-decoration: none;" target="_blank">{{.SeriesTitle}}</a>{{else}}{{.SeriesTitle}}{{end}}
+                                </h3>
+                                {{if $.ShowPosters}}
+                                {{if .PosterURL}}
+                                <img src="{{.PosterURL}}" alt="{{.SeriesTitle}}" style="max-width: 200px; height: auto; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" />
+                                {{end}}
+                                {{end}}
+                                <ul style="margin: 0; padding-left: 20px; color: #555;">
+                                    {{range .Episodes}}
+                                    <li style="margin-bottom: 8px;">
+                                        <strong>S{{printf "%02d" .SeasonNum}}E{{printf "%02d" .EpisodeNum}}</strong> - {{.Title}}
+                                        {{if .AirDate}}<br/><span style="color: #888; font-size: 14px;">Airs: {{.AirDate}}</span>{{end}}
+                                    </li>
+                                    {{end}}
+                                </ul>
+                            </div>
+                            {{end}}
+
+                            <!-- Movies -->
+                            {{range .UpcomingMovies}}
+                            <div style="margin-bottom: 20px; padding: 20px; background-color: #f8f9fa; border-radius: 8px;">
+                                <h3 style="margin: 0 0 10px 0; color: #333; font-size: 20px; font-weight: 600;">
+                                    {{if .IMDBID}}<a href="https://www.imdb.com/title/{{.IMDBID}}" style="color: #667eea; text-decoration: none;" target="_blank">{{.Title}} ({{.Year}})</a>{{else}}{{.Title}} ({{.Year}}){{end}}
+                                </h3>
+                                {{if $.ShowPosters}}
+                                {{if .PosterURL}}
+                                <img src="{{.PosterURL}}" alt="{{.Title}}" style="max-width: 200px; height: auto; border-radius: 8px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" />
+                                {{end}}
+                                {{end}}
+                                {{if .ReleaseDate}}
+                                <p style="margin: 5px 0 0 0; color: #888; font-size: 14px;">Releases: {{.ReleaseDate}}</p>
+                                {{end}}
+                            </div>
+                            {{end}}
+                        </td>
+                    </tr>
+                    {{end}}
+
+                    <!-- Downloaded This Week -->
+                    {{if $.ShowDownloaded}}
+                    {{if or .DownloadedSeriesGroups .DownloadedMovies}}
+                    <tr>
+                        <td style="padding: 40px; background-color: #fafbfc;">
+                            <h2 style="margin: 0 0 20px 0; color: #333; font-size: 24px; font-weight: 600; border-bottom: 3px solid #38ef7d; padding-bottom: 10px;">✅ Downloaded This Week</h2>
+
+                            <!-- TV Shows -->
+                            {{range .DownloadedSeriesGroups}}
+                            <div style="margin-bottom: 30px; padding: 20px; background-color: #ffffff; border-radius: 8px; border-left: 4px solid #38ef7d;">
+                                <h3 style="margin: 0 0 15px 0; color: #333; font-size: 20px; font-weight: 600;">
+                                    {{if .IMDBID}}<a href="https://www.imdb.com/title/{{.IMDBID}}" style="color: #11998e; text-decoration: none;" target="_blank">{{.SeriesTitle}}</a>{{else}}{{.SeriesTitle}}{{end}}
+                                </h3>
+                                {{if $.ShowPosters}}
+                                {{if .PosterURL}}
+                                <img src="{{.PosterURL}}" alt="{{.SeriesTitle}}" style="max-width: 200px; height: auto; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" />
+                                {{end}}
+                                {{end}}
+                                <ul style="margin: 0; padding-left: 20px; color: #555;">
+                                    {{range .Episodes}}
+                                    <li style="margin-bottom: 8px;">
+                                        <strong>S{{printf "%02d" .SeasonNum}}E{{printf "%02d" .EpisodeNum}}</strong> - {{.Title}}
+                                    </li>
+                                    {{end}}
+                                </ul>
+                            </div>
+                            {{end}}
+
+                            <!-- Movies -->
+                            {{range .DownloadedMovies}}
+                            <div style="margin-bottom: 20px; padding: 20px; background-color: #ffffff; border-radius: 8px; border-left: 4px solid #38ef7d;">
+                                <h3 style="margin: 0 0 10px 0; color: #333; font-size: 20px; font-weight: 600;">
+                                    {{if .IMDBID}}<a href="https://www.imdb.com/title/{{.IMDBID}}" style="color: #11998e; text-decoration: none;" target="_blank">{{.Title}} ({{.Year}})</a>{{else}}{{.Title}} ({{.Year}}){{end}}
+                                </h3>
+                                {{if $.ShowPosters}}
+                                {{if .PosterURL}}
+                                <img src="{{.PosterURL}}" alt="{{.Title}}" style="max-width: 200px; height: auto; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" />
+                                {{end}}
+                                {{end}}
+                            </div>
+                            {{end}}
+                        </td>
+                    </tr>
+                    {{end}}
+                    {{end}}
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="padding: 30px; text-align: center; background-color: #2a3444; color: #a0b0c0;">
+                            <p style="margin: 0; font-size: 14px;">
+                                Generated by <strong style="color: #ffffff;">Newslettar</strong>
+                            </p>
+                            <p style="margin: 10px 0 0 0; font-size: 12px; opacity: 0.8;">
+                                Powered by Sonarr & Radarr
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
